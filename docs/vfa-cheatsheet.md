@@ -1,5 +1,23 @@
 # vfa Cheat Sheet for mykb Development
 
+## What is vfa?
+
+`vfa` (vf-agents) is the **only way we run Pi**. Pi is not installed locally — it runs inside Docker containers managed by vfa. Every `vfa run` or `vfa session start` spins up a fresh Pi container, mounts credentials and extensions, executes the prompt, and returns a normalized JSON result.
+
+The flow:
+```
+You → vfa CLI → Docker container (Pi + extensions) → LLM provider → result JSON
+```
+
+For mykb development, vfa is how we test Pi extensions. We create a **run profile** that mounts our extension code into the container's Pi extensions directory. Pi auto-discovers and loads it.
+
+## When to use `run` vs `session`
+
+| Use | When |
+|-----|------|
+| `vfa run` | Single-shot test — one prompt, one response, container destroyed. Use for spike testing and quick validation. |
+| `vfa session start/send` | Multi-turn test — container stays alive, conversation context preserved across turns. Use when testing context persistence, multi-step interactions, or extension state that accumulates over turns. |
+
 ## Quick Reference
 
 ```bash
@@ -70,16 +88,25 @@ Provider configs live at `~/.vf-agents/providers/*.yaml`.
 
 ## Profile Plugin Mounts (Pi Extensions)
 
-In a profile YAML, mount host directories into Pi's extension path:
+This is how mykb extension code gets into the Pi container. The profile YAML uses `plugins` to volume-mount a host directory into Pi's extensions path inside the container:
 
 ```yaml
+# ~/.vf-agents/profiles/mykb-spike.yaml
 plugins:
   pi:
-    - source: /home/jasonvi/GitHub/mykb/spikes/active-spike
-      mount: /home/node/.pi/agent/extensions/mykb-spike
+    - source: /home/jasonvi/GitHub/mykb/spikes/active-spike    # host path
+      mount: /home/node/.pi/agent/extensions/mykb-spike         # container path
 ```
 
-The container user is `node` (UID 1000). Pi extensions auto-discover from `~/.pi/agent/extensions/`.
+**How it works:**
+1. vfa reads the profile and creates a Docker volume mount: `host:source → container:mount`
+2. The container starts with Pi installed at `/home/node/.pi/agent/`
+3. Pi scans `~/.pi/agent/extensions/` on startup and auto-discovers any `index.ts` files
+4. Your extension loads in-process — no registration, no configuration
+
+**The container user is `node` (UID 1000).** Extensions path inside the container is `/home/node/.pi/agent/extensions/`.
+
+**If the extension needs npm dependencies** (e.g., `better-sqlite3`), install them on the host first (`npm install` in the spike directory). The `node_modules/` gets mounted into the container along with the code. Host and container must share the same Node.js major version (both Node.js 20) for native modules to work.
 
 ## Pi Container Details
 
