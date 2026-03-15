@@ -20,7 +20,17 @@ Same gates as core mykb — enforced between every phase:
 
 **Code gate:** All tests pass, no `any`, interfaces before implementations, DI, error handling.
 **TDD gate:** Git log shows RED → GREEN → REFACTOR sequence.
-**LLM gate (Phase 3 only):** AI uses workspace tools correctly, context pre-loads on session start.
+**LLM gate (Phase W3 only):** AI uses workspace tools correctly, context pre-loads on session start.
+
+**Workspace-specific guardrails** (see [workspaces-design-guardrails.md](workspaces-design-guardrails.md) for full rationale):
+- [ ] No `import fs` in workspace consumers — only `FileSystemWorkspaceStorage` touches the filesystem
+- [ ] No hardcoded workspace paths (`workspaces/`, `workspace.json`, `journal.jsonl`, `.active`) outside `FileSystemWorkspaceStorage`
+- [ ] No git operations inside `WorkspaceStorage` — git stays in `save.ts`
+- [ ] `updateWorkspaceState` uses `Partial<WorkspaceState>` — never overwrites unrelated fields
+- [ ] `archiveWorkspace` preserves data (moves to archive/), never deletes
+- [ ] Single `WorkspaceStorage` instance created in extension entry point, passed to all hooks and tools via DI
+- [ ] Active workspace accessed only via `getActiveWorkspaceId()` / `setActiveWorkspaceId()` / `clearActiveWorkspaceId()`
+- [ ] Journal accessed only via `appendJournal()` / `readJournal()` on the interface
 
 ## Test Isolation
 
@@ -32,9 +42,17 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
 
 **Goal:** Create, read, update, list, archive workspaces. Append and read journal entries.
 
-**SOLID focus:** Single Responsibility — `workspace.ts` handles workspace metadata CRUD, `journal.ts` handles journal append/read. Interface Segregation — workspace operations don't depend on knowledge store.
+**SOLID focus:** Single Responsibility — `workspace.ts` handles all workspace storage operations (CRUD, journal, documents). Dependency Inversion — define `WorkspaceStorage` interface FIRST, then implement `FileSystemWorkspaceStorage`. Interface Segregation — workspace operations don't depend on knowledge store.
 
-**Pattern:** Repository — workspace storage is file-based JSON, same pattern as `area.ts`. Journal uses JSONL, same pattern as `store.ts`.
+**Pattern:** Repository — `FileSystemWorkspaceStorage` implements `WorkspaceStorage` interface. All filesystem access (`fs.*`, path construction, directory creation) is encapsulated inside this class. No consumer ever imports `fs` or constructs workspace paths.
+
+**Guardrails enforced in this phase:**
+- Interface defined before implementation (Guardrail: DI)
+- All `fs` operations inside `FileSystemWorkspaceStorage` only (Guardrail 1)
+- All path construction inside `FileSystemWorkspaceStorage` only (Guardrail 2)
+- No git operations in workspace storage (Guardrail 6)
+- `updateWorkspaceState` accepts `Partial<WorkspaceState>` (Guardrail 7)
+- `archiveWorkspace` moves, never deletes (Guardrail 8)
 
 **Development process:**
 
@@ -168,7 +186,14 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
 
 **SOLID focus:** Single Responsibility — each command is a thin wrapper. Dependency Inversion — commands receive a `WorkspaceStorage` instance, never import `FileSystemWorkspaceStorage` directly.
 
-**Pattern:** Same as Phase 5 CLI — parse args → call core → render output. No business logic in CLI.
+**Pattern:** Same as Phase 5 CLI — parse args → call storage interface → render output. No business logic in CLI.
+
+**Guardrails enforced in this phase:**
+- Commands receive `WorkspaceStorage`, never construct it or import concrete class (Guardrail 1, 2)
+- Commands call `storage.getActiveWorkspaceId()`, never read `.active` file (Guardrail 4)
+- `kb work state` passes partial state object to `storage.updateWorkspaceState()` (Guardrail 7)
+- `kb work journal` calls `storage.appendJournal()`, never writes JSONL directly (Guardrail 5)
+- Verification: grep `src/cli/commands/work.ts` for `import fs`, `readFileSync`, `writeFileSync`, `workspaces/`, `.active` — must find zero hits
 
 **Development process:**
 
@@ -221,6 +246,16 @@ kb work stop
 **SOLID focus:** Open/Closed — workspace hooks extend the existing session hooks without modifying them. Dependency Inversion — workspace tools and hooks depend on `WorkspaceStorage` interface, not `FileSystemWorkspaceStorage`. Interface Segregation — workspace tools don't depend on the knowledge store.
 
 **Pattern:** Observer — workspace hooks subscribe to the same Pi events alongside existing hooks. Strategy — workspace context injection is a new signal source for the scorer (linked areas get boosted).
+
+**Guardrails enforced in this phase:**
+- Extension entry point creates ONE `FileSystemWorkspaceStorage` instance, passes to all hooks and tools (Guardrail 9)
+- Hooks and tools type their parameter as `WorkspaceStorage`, never `FileSystemWorkspaceStorage` (Guardrail 1)
+- Session start reads active workspace via `storage.getActiveWorkspaceId()`, never reads `.active` file (Guardrail 4)
+- Session start reads journal via `storage.readJournal()`, never reads JSONL directly (Guardrail 5)
+- `kb_work_state` tool calls `storage.updateWorkspaceState()` with partial state (Guardrail 7)
+- `kb_work_journal` tool calls `storage.appendJournal()` (Guardrail 5)
+- Document creation: AI uses Pi's native `write` tool to create docs in workspace directory. Index updated on `kb save` via `storage.updateDocumentIndex()`. No `kb_write_doc` tool needed for filesystem backend (Guardrail 3 from design guardrails)
+- Verification: grep extension and tools files for `import fs`, `readFileSync`, `writeFileSync`, `workspaces/`, `.active`, `journal.jsonl` — must find zero hits
 
 **Development process:**
 
