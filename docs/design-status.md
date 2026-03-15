@@ -85,10 +85,11 @@ Why this format:
 Based on Vercel's research showing always-loaded context (100% pass rate) outperforms on-demand skills (53%):
 
 **Tier 1 — Always loaded (system prompt)**
-- Area index (ID + one-line summary for each area)
-- Kept small (<8KB)
-- Injected at session start via Pi's `before_agent_start` or system prompt modification
-- Always reliable — the AI always knows what knowledge domains exist
+- Area index: ID + one-line summary for each area (from manifest.json)
+- Summaries only, no facts — just enough for the AI to know what domains exist
+- Kept small (<8KB). At 17 areas with one-line summaries, this is ~500 tokens.
+- Injected at session start via Pi's `before_agent_start` system prompt modification
+- Always reliable — the AI always knows what knowledge domains are available for Tier 2/3 loading
 
 **Tier 2 — Auto-injected (per-turn)**
 - Relevant area facts based on what the AI is working on
@@ -434,12 +435,24 @@ The `kb` CLI is focused on knowledge management only. No workspaces, journals, i
 
 Note: `kb load <area>` serves as the render command — outputs markdown by default, JSON with `--json`. No separate `render` command needed.
 
+**CLI write feedback:**
+All write commands (`kb add`, `kb update`, `kb verify`, `kb promote`, `kb archive`, `kb delete`) return:
+- The entry ID (created or modified)
+- The area and type
+- The current count of entries in that area
+
+Example: `added fact a1b2c3d4 to ci-pipelines (23 facts, 4 decisions, 2 gotchas)`
+
+This addresses an OSB v1 pain point where `add-fact: ok` gave no useful feedback.
+
 **Improvements over OSB v1:**
 - `kb promote` — explicit zone promotion (OSB had no API for this)
 - `kb verify` — single command to refresh provenance (OSB required manual edits)
 - `kb rebuild` — explicit cache rebuild (OSB regenerated on every save)
 - No `install-hooks` command — Pi auto-discovers extensions
 - Separate `add` subcommands per type instead of `add-fact`, `add-decision` etc.
+- All `--rejected`, `--why`, `--context`, `--source` flags are optional (OSB v1 required `--rejected` on decisions)
+- Write commands return created ID and entry counts (OSB v1 returned only "ok")
 
 ### 6. Context Injection Strategy
 
