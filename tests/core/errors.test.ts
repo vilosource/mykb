@@ -9,11 +9,31 @@ import {
 } from '../../src/core/errors.js';
 
 const errorCases = [
-  { ErrorClass: BrainNotInitializedError, name: 'BrainNotInitializedError', message: 'brain not found' },
-  { ErrorClass: AreaNotFoundError, name: 'AreaNotFoundError', message: 'area "networking" not found' },
-  { ErrorClass: EntryNotFoundError, name: 'EntryNotFoundError', message: 'entry "abc123" not found' },
-  { ErrorClass: EntryValidationError, name: 'EntryValidationError', message: 'missing required field: text' },
-  { ErrorClass: StoreCorruptionError, name: 'StoreCorruptionError', message: 'malformed JSONL at line 42' },
+  {
+    ErrorClass: BrainNotInitializedError,
+    name: 'BrainNotInitializedError',
+    message: 'brain not found',
+  },
+  {
+    ErrorClass: AreaNotFoundError,
+    name: 'AreaNotFoundError',
+    message: 'area "networking" not found',
+  },
+  {
+    ErrorClass: EntryNotFoundError,
+    name: 'EntryNotFoundError',
+    message: 'entry "abc123" not found',
+  },
+  {
+    ErrorClass: EntryValidationError,
+    name: 'EntryValidationError',
+    message: 'missing required field: text',
+  },
+  {
+    ErrorClass: StoreCorruptionError,
+    name: 'StoreCorruptionError',
+    message: 'malformed JSONL at line 42',
+  },
   { ErrorClass: DatabaseError, name: 'DatabaseError', message: 'SQLite operation failed' },
 ] as const;
 
