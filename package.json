@@ -1,0 +1,58 @@
+{
+  "name": "@vilosource/mykb",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Knowledge management system for AI coding agents",
+  "keywords": [
+    "pi-package"
+  ],
+  "bin": {
+    "kb": "./dist/cli/cli.js"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/extension"
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint . && prettier --check .",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "commander": "^13.0.0",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-agent-core": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-ai": {
+      "optional": true
+    },
+    "@mariozechner/pi-agent-core": {
+      "optional": true
+    },
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    },
+    "@sinclair/typebox": {
+      "optional": true
+    }
+  }
+}
