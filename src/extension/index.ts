@@ -34,16 +34,16 @@ export default function (pi: ExtensionAPI): void {
   // Tool gating — block direct edits to knowledge files
   const gatingHandler = createToolGatingHandler(brainPath);
   const signalHandler = createToolCallHandler(state);
-  pi.on('tool_call', async (...args: unknown[]): Promise<unknown> => {
+  pi.on('tool_call', async (event: unknown, ctx: unknown): Promise<unknown> => {
+    const e = event as { toolName: string; input: Record<string, unknown> };
     // Run gating first — if blocked, return the block result
-    const event = args[0] as { tool: string; params: Record<string, unknown> };
     const gatingResult = await gatingHandler({
-      toolName: event.tool,
-      input: event.params,
+      toolName: e.toolName,
+      input: e.input,
     });
     if (gatingResult) return gatingResult;
     // Otherwise, collect signals
-    return signalHandler(...args);
+    return signalHandler(event, ctx);
   });
 
   // Signal collection hooks
