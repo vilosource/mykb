@@ -41,7 +41,11 @@ A workspace is NOT a knowledge store. It is a small metadata file that:
 
 All project-scoped knowledge (facts, decisions, gotchas, patterns) lives in mykb areas — typically an area with the same name as the workspace (e.g., workspace `stark-picking` links to area `stark-picking` plus areas `stark` and `infra-vm`).
 
-### Storage
+### Storage abstraction
+
+Workspace storage is accessed through a `WorkspaceStorage` interface. All consumers (CLI, Pi extension, tools) depend on this interface, never on a concrete implementation. Today: `FileSystemWorkspaceStorage` using the brain git repo. In the future: Azure Blob, S3, NFS, or any virtual filesystem — swap the implementation without changing consumers.
+
+### Current implementation: filesystem
 
 ```
 ~/.mykb/

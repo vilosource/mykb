@@ -38,34 +38,72 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
 
 **Development process:**
 
-1. **Types.** Add to `src/core/types.ts`:
+1. **Types and interface.** Add to `src/core/types.ts`:
    - `WorkspaceState`: `{ phase?, active?, blocked?, next? }` (all optional for partial updates)
    - `WorkspaceLinks`: `{ jira?, wiki?, repos? }`
    - `WorkspaceDocument`: `{ path, description: string | null }`
    - `Workspace`: `{ id, name, state, areas, links, documents, created, updated }`
    - `JournalEntry`: `{ date, text }`
-   Commit: `feat: add workspace and journal types`
+   - `WorkspaceStorage` interface — the abstraction that all consumers depend on:
+     ```typescript
+     interface WorkspaceStorage {
+       // Workspace CRUD
+       createWorkspace(id: string, name: string, options?: CreateWorkspaceOptions): void;
+       readWorkspace(id: string): Workspace | null;
+       updateWorkspaceState(id: string, state: Partial<WorkspaceState>): void;
+       updateWorkspaceLinks(id: string, links: Partial<WorkspaceLinks>): void;
+       linkArea(id: string, area: string): void;
+       unlinkArea(id: string, area: string): void;
+       listWorkspaces(): Workspace[];
+       archiveWorkspace(id: string): void;
 
-2. **Workspace CRUD.** File: `src/core/workspace.ts`. Test: `tests/core/workspace.test.ts`
-   - RED: test `createWorkspace(brainPath, id, name, options?)` creates `workspaces/<id>/workspace.json`
-   - RED: test `readWorkspace(brainPath, id)` returns Workspace
-   - RED: test `updateWorkspaceState(brainPath, id, state)` modifies state fields
-   - RED: test `updateWorkspaceLinks(brainPath, id, links)` modifies links
-   - RED: test `linkArea(brainPath, id, area)` adds area to workspace.areas
-   - RED: test `unlinkArea(brainPath, id, area)` removes area
-   - RED: test `listWorkspaces(brainPath)` returns all workspaces
-   - RED: test `archiveWorkspace(brainPath, id)` moves to `workspaces/archive/`
-   - RED: test `getActiveWorkspace(brainPath)` / `setActiveWorkspace(brainPath, id)` / `clearActiveWorkspace(brainPath)` — tracks which workspace is active via `workspaces/.active` file
-   - RED: test `updateWorkspaceState` with `Partial<WorkspaceState>` — updating only `phase` preserves `active`, `blocked`, `next`
+       // Active workspace
+       getActiveWorkspaceId(): string | null;
+       setActiveWorkspaceId(id: string): void;
+       clearActiveWorkspaceId(): void;
+
+       // Journal
+       appendJournal(id: string, text: string): void;
+       readJournal(id: string, limit?: number): JournalEntry[];
+
+       // Documents
+       writeDocument(id: string, path: string, content: string): void;
+       readDocument(id: string, path: string): string | null;
+       listDocuments(id: string): WorkspaceDocument[];
+       deleteDocument(id: string, path: string): void;
+       scanDocumentIndex(id: string): WorkspaceDocument[];
+       updateDocumentIndex(id: string): void;
+     }
+     ```
+   - `CreateWorkspaceOptions`: `{ areas?, links? }`
+
+   This interface enables future storage backends (Azure Blob, S3, NFS) without changing consumers. Today: `FileSystemWorkspaceStorage`. Tomorrow: swap the implementation.
+
+   Commit: `feat: add workspace types and WorkspaceStorage interface`
+
+2. **FileSystemWorkspaceStorage.** File: `src/core/workspace.ts`. Test: `tests/core/workspace.test.ts`
+   Implements `WorkspaceStorage` interface using the filesystem at `~/.mykb/workspaces/`.
+   Constructor takes `brainPath`.
+
+   - RED: test `createWorkspace(id, name, options?)` creates `workspaces/<id>/workspace.json`
+   - RED: test `readWorkspace(id)` returns Workspace
+   - RED: test `updateWorkspaceState(id, state)` modifies state fields
+   - RED: test `updateWorkspaceLinks(id, links)` modifies links
+   - RED: test `linkArea(id, area)` adds area to workspace.areas
+   - RED: test `unlinkArea(id, area)` removes area
+   - RED: test `listWorkspaces()` returns all workspaces
+   - RED: test `archiveWorkspace(id)` moves to `workspaces/archive/`
+   - RED: test `getActiveWorkspaceId()` / `setActiveWorkspaceId(id)` / `clearActiveWorkspaceId()` — tracks via `workspaces/.active` file
+   - RED: test `updateWorkspaceState` with partial state — updating only `phase` preserves `active`, `blocked`, `next`
    - RED: test `createWorkspace` auto-creates `workspaces/` directory if it doesn't exist
-   - RED: test `readWorkspace` when linked area doesn't exist in mykb — returns workspace normally (area existence is not validated at read time, only at load/boost time)
+   - RED: test `readWorkspace` when linked area doesn't exist in mykb — returns workspace normally (area existence is not validated at read time)
    - GREEN: implement each
    - Table-driven tests for state update (phase only, active only, multiple fields)
-   Commits: `test: workspace CRUD` → `feat: implement workspace storage`
+   Commits: `test: workspace CRUD` → `feat: implement FileSystemWorkspaceStorage`
 
-3. **Journal.** File: `src/core/journal.ts`. Test: `tests/core/journal.test.ts`
-   - RED: test `appendJournal(brainPath, workspaceId, text)` appends to `workspaces/<id>/journal.jsonl`
-   - RED: test `readJournal(brainPath, workspaceId, limit?)` returns last N entries (default 5)
+3. **Journal (part of FileSystemWorkspaceStorage).**
+   - RED: test `appendJournal(id, text)` appends to `workspaces/<id>/journal.jsonl`
+   - RED: test `readJournal(id, limit?)` returns last N entries (default 5)
    - RED: test `readJournal` with empty journal returns empty array
    - GREEN: implement
    Commits: `test: journal append and read` → `feat: implement journal`
@@ -85,13 +123,13 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
    - GREEN: implement
    Commits: `test: workspace rendering` → `feat: implement renderWorkspace`
 
-5. **Document index scanning.** File: `src/core/workspace.ts` (add function). Test: `tests/core/workspace.test.ts` (extend)
-   - RED: test `scanWorkspaceDocuments(brainPath, id)` finds all `.md` files in workspace directory (excluding `workspace.json` and `journal.jsonl`), reads frontmatter `description` field, returns `WorkspaceDocument[]`
+5. **Document index scanning (part of FileSystemWorkspaceStorage).**
+   - RED: test `scanDocumentIndex(id)` finds all `.md` files in workspace directory (excluding `workspace.json` and `journal.jsonl`), reads frontmatter `description` field, returns `WorkspaceDocument[]`
    - RED: test with no docs → returns empty array
    - RED: test with doc missing frontmatter → `description: null`
    - RED: test with doc having frontmatter → extracts description
    - GREEN: implement. Scan recursively, read first 10 lines, parse YAML between `---` delimiters.
-   - RED: test `updateDocumentIndex(brainPath, id)` calls `scanWorkspaceDocuments` and writes result to `workspace.json` `documents` field
+   - RED: test `updateDocumentIndex(id)` calls `scanDocumentIndex` and writes result to `workspace.json` `documents` field
    - GREEN: implement. Called by `kb save`.
    Commits: `test: document index scanning` → `feat: implement workspace document index`
 
@@ -128,7 +166,7 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
 
 **Goal:** `kb work *` commands that exercise workspace core.
 
-**SOLID focus:** Single Responsibility — each command is a thin wrapper. Dependency Inversion — commands receive workspace functions via the same core library.
+**SOLID focus:** Single Responsibility — each command is a thin wrapper. Dependency Inversion — commands receive a `WorkspaceStorage` instance, never import `FileSystemWorkspaceStorage` directly.
 
 **Pattern:** Same as Phase 5 CLI — parse args → call core → render output. No business logic in CLI.
 
@@ -180,7 +218,7 @@ kb work stop
 
 **Goal:** Workspaces integrate with mykb's Pi extension — session start pre-loads workspace context, tools let the AI update state and journal.
 
-**SOLID focus:** Open/Closed — workspace hooks extend the existing session hooks without modifying them. Interface Segregation — workspace tools depend only on workspace core, not on the knowledge store.
+**SOLID focus:** Open/Closed — workspace hooks extend the existing session hooks without modifying them. Dependency Inversion — workspace tools and hooks depend on `WorkspaceStorage` interface, not `FileSystemWorkspaceStorage`. Interface Segregation — workspace tools don't depend on the knowledge store.
 
 **Pattern:** Observer — workspace hooks subscribe to the same Pi events alongside existing hooks. Strategy — workspace context injection is a new signal source for the scorer (linked areas get boosted).
 
