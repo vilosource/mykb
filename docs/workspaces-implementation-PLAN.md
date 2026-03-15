@@ -39,14 +39,15 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
 **Development process:**
 
 1. **Types.** Add to `src/core/types.ts`:
-   - `WorkspaceState`: `{ phase, active, blocked, next }`
-   - `WorkspaceLinks`: `{ jira?, wiki?, repos?, docs? }`
-   - `Workspace`: `{ id, name, state, areas, links, created, updated }`
+   - `WorkspaceState`: `{ phase?, active?, blocked?, next? }` (all optional for partial updates)
+   - `WorkspaceLinks`: `{ jira?, wiki?, repos? }`
+   - `WorkspaceDocument`: `{ path, description: string | null }`
+   - `Workspace`: `{ id, name, state, areas, links, documents, created, updated }`
    - `JournalEntry`: `{ date, text }`
    Commit: `feat: add workspace and journal types`
 
 2. **Workspace CRUD.** File: `src/core/workspace.ts`. Test: `tests/core/workspace.test.ts`
-   - RED: test `createWorkspace(brainPath, id, name, options?)` creates `workspaces/<id>.json`
+   - RED: test `createWorkspace(brainPath, id, name, options?)` creates `workspaces/<id>/workspace.json`
    - RED: test `readWorkspace(brainPath, id)` returns Workspace
    - RED: test `updateWorkspaceState(brainPath, id, state)` modifies state fields
    - RED: test `updateWorkspaceLinks(brainPath, id, links)` modifies links
@@ -63,7 +64,7 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
    Commits: `test: workspace CRUD` → `feat: implement workspace storage`
 
 3. **Journal.** File: `src/core/journal.ts`. Test: `tests/core/journal.test.ts`
-   - RED: test `appendJournal(brainPath, workspaceId, text)` appends to `workspaces/<id>.journal.jsonl`
+   - RED: test `appendJournal(brainPath, workspaceId, text)` appends to `workspaces/<id>/journal.jsonl`
    - RED: test `readJournal(brainPath, workspaceId, limit?)` returns last N entries (default 5)
    - RED: test `readJournal` with empty journal returns empty array
    - GREEN: implement
@@ -84,7 +85,17 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
    - GREEN: implement
    Commits: `test: workspace rendering` → `feat: implement renderWorkspace`
 
-5. **Barrel exports.** Update `src/core/index.ts`.
+5. **Document index scanning.** File: `src/core/workspace.ts` (add function). Test: `tests/core/workspace.test.ts` (extend)
+   - RED: test `scanWorkspaceDocuments(brainPath, id)` finds all `.md` files in workspace directory (excluding `workspace.json` and `journal.jsonl`), reads frontmatter `description` field, returns `WorkspaceDocument[]`
+   - RED: test with no docs → returns empty array
+   - RED: test with doc missing frontmatter → `description: null`
+   - RED: test with doc having frontmatter → extracts description
+   - GREEN: implement. Scan recursively, read first 10 lines, parse YAML between `---` delimiters.
+   - RED: test `updateDocumentIndex(brainPath, id)` calls `scanWorkspaceDocuments` and writes result to `workspace.json` `documents` field
+   - GREEN: implement. Called by `kb save`.
+   Commits: `test: document index scanning` → `feat: implement workspace document index`
+
+6. **Barrel exports.** Update `src/core/index.ts`.
    Commit: `feat: export workspace and journal modules`
 
 **Deliverables:**
@@ -102,7 +113,11 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
 - Active workspace → set/get/clear persists across calls
 - Create workspace auto-creates workspaces/ directory
 - Partial state update → only specified fields change, others preserved
-- Render workspace → formatted markdown output
+- Render workspace → formatted markdown output including document list
+- Document scan with frontmatter → extracts description
+- Document scan without frontmatter → description is null
+- Document scan empty workspace → empty array
+- updateDocumentIndex → writes documents to workspace.json
 - Journal append → new entry in JSONL
 - Journal read with limit → returns last N
 - Journal read empty → returns []

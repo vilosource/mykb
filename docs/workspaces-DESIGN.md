@@ -50,9 +50,19 @@ All project-scoped knowledge (facts, decisions, gotchas, patterns) lives in mykb
 │   ├── stark/
 │   └── infra-vm/
 ├── workspaces/               # orchestration (new)
-│   ├── stark-picking.json
-│   ├── dr.json
-│   └── sonarqube-upgrade.json
+│   ├── stark-picking/
+│   │   ├── workspace.json    # state, area links, external links
+│   │   ├── journal.jsonl     # session progress log
+│   │   ├── docs/             # WIP documents, planning artifacts
+│   │   │   ├── server-inventory.md
+│   │   │   └── deployment-plan.md
+│   │   ├── backlog/          # work item tracking
+│   │   │   └── items.md
+│   │   └── scratch/          # temporary notes
+│   │       └── notes.md
+│   ├── dr/
+│   │   ├── workspace.json
+│   │   └── journal.jsonl
 ├── manifest.json
 └── kb.db
 ```
@@ -76,9 +86,12 @@ All project-scoped knowledge (facts, decisions, gotchas, patterns) lives in mykb
     "repos": [
       "stark/stark-picking-dashboard",
       "stark/stark-pda-deployment"
-    ],
-    "docs": []
+    ]
   },
+  "documents": [
+    {"path": "docs/server-inventory.md", "description": "VM specs, IPs, and access details"},
+    {"path": "backlog/items.md", "description": null}
+  ],
   "created": "2026-03-07",
   "updated": "2026-03-15"
 }
@@ -86,16 +99,65 @@ All project-scoped knowledge (facts, decisions, gotchas, patterns) lives in mykb
 
 ### Journal
 
-Journal entries are stored separately as a JSONL file per workspace:
+Journal entries stored as JSONL alongside the workspace:
 
 ```
-~/.mykb/workspaces/stark-picking.journal.jsonl
+~/.mykb/workspaces/stark-picking/journal.jsonl
 ```
 
 Each line:
 ```json
 {"date":"2026-03-09","text":"Dev VM complete, phase moved to server-setup. Blocker: Christian VPN+gateway routes."}
 ```
+
+### Documents — WIP artifacts
+
+A workspace is also a **scratch space** for planning documents, backlogs, analysis, specs-in-progress, and any other files that don't belong in a git repo yet. These are WIP artifacts created during the work.
+
+```
+~/.mykb/workspaces/stark-picking/
+├── docs/
+│   ├── server-inventory.md
+│   └── azure-vm-base-analysis.md
+├── backlog/
+│   └── items.md
+└── scratch/
+    └── deployment-notes.md
+```
+
+The AI creates these during sessions. They're git-tracked in the brain repo and archived with the workspace when the project completes.
+
+### Document index via frontmatter
+
+Documents use YAML frontmatter for metadata:
+
+```yaml
+---
+title: Server Inventory
+description: VM specs, IPs, and access details for Stark PDA servers
+---
+```
+
+The workspace maintains a **document index** — auto-regenerated on every `kb save` by scanning all files in the workspace directory and reading their frontmatter `description` field:
+
+```json
+{
+  "docs": [
+    {"path": "docs/server-inventory.md", "description": "VM specs, IPs, and access details for Stark PDA servers"},
+    {"path": "docs/azure-vm-base-analysis.md", "description": "Analysis of azure-vm-base Ansible role capabilities"},
+    {"path": "backlog/items.md", "description": null},
+    {"path": "scratch/deployment-notes.md", "description": "Rough notes on deployment sequence"}
+  ]
+}
+```
+
+This index is stored in `workspace.json` under a `documents` field and injected at session start alongside workspace state. The AI knows what documents exist without loading their contents — it can `read` any of them on demand (Tier 3 progressive disclosure).
+
+**Rules:**
+- Index auto-regenerated on `kb save` by scanning workspace directory for `.md` files
+- If a doc has frontmatter with `description`, use it. Otherwise, `description: null` (filename still listed).
+- No LLM needed for summarization — the AI writes the frontmatter when it creates the doc
+- Scanning is cheap — read first 10 lines of each file, parse YAML between `---` delimiters
 
 This keeps the workspace JSON small (state + links only) while the journal grows over time.
 
@@ -106,10 +168,11 @@ When you start working on a workspace, mykb needs to load the right knowledge wi
 ### How it works with mykb's three tiers
 
 **Session start (`kb work start stark-picking`):**
-1. Read workspace JSON — get state, links, linked areas
+1. Read workspace JSON — get state, links, linked areas, document index
 2. Add linked areas to Tier 2's sticky set — scorer will prioritize these
 3. Inject workspace state as a system message: "You are working on: Stark Picking Dashboard. Phase: server-setup. Active: M2 app installation."
 4. Inject recent journal entries (last 3)
+5. Inject document index: "Workspace documents: server-inventory.md (VM specs, IPs), deployment-plan.md (Rough deployment sequence)" — the AI can `read` any of them on demand
 
 **During the session:**
 - Tier 2 scorer has the linked areas boosted — they score higher even without explicit signals
@@ -136,9 +199,10 @@ When you start working on a workspace, mykb needs to load the right knowledge wi
 - Workspace state (phase, active, blocked, next) — ~50 tokens
 - Last 3 journal entries — ~200 tokens
 - External links (Jira, repos, wiki) — ~100 tokens
+- Document index (filename + one-line description per doc) — ~50-100 tokens
 - Tier 2 scorer pre-seeded with linked area IDs — automatic injection starts immediately
 
-Total upfront cost: ~350 tokens. The rest comes via Tier 2 as you work.
+Total upfront cost: ~400-450 tokens. The rest comes via Tier 2 as you work.
 
 ## CLI commands
 
