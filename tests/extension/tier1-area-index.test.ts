@@ -49,10 +49,12 @@ describe('Tier 1 — before_agent_start handler', () => {
 
       try {
         const handler = createBeforeAgentStartHandler(store, state, brainPath);
-        const result = await handler();
+        const mockEvent = { systemPrompt: 'existing system prompt' };
+        const result = await handler(mockEvent, {});
 
         expect(result).toBeDefined();
         expect(result.systemPrompt).toBeDefined();
+        expect(result.systemPrompt).toContain('existing system prompt');
         expect(result.systemPrompt).toContain('networking');
         expect(result.systemPrompt).toContain('Network config, DNS, VPN');
       } finally {
@@ -69,7 +71,8 @@ describe('Tier 1 — before_agent_start handler', () => {
 
       try {
         const handler = createBeforeAgentStartHandler(store, state, brainPath);
-        const result = await handler();
+        const mockEvent = { systemPrompt: '' };
+        const result = await handler(mockEvent, {});
 
         // Should still return a result but with minimal/no area index
         expect(result).toBeDefined();

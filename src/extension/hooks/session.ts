@@ -14,30 +14,34 @@ export function createBeforeAgentStartHandler(
   _store: MykbStore,
   _state: SessionState,
   brainPath: string,
-): () => Promise<BeforeAgentStartResult> {
-  return async (): Promise<BeforeAgentStartResult> => {
+): (event: unknown, ctx: unknown) => Promise<BeforeAgentStartResult> {
+  return async (event: unknown, _ctx: unknown): Promise<BeforeAgentStartResult> => {
+    // Pi passes the current system prompt in the event — we must APPEND, not replace
+    const e = event as { systemPrompt?: string; prompt?: string };
+    const currentPrompt = e.systemPrompt || '';
+
     const manifest = readManifest(brainPath);
 
+    let areaBlock: string;
     if (!manifest || manifest.areas.length === 0) {
-      return {
-        systemPrompt: '<mykb-areas>\nNo knowledge areas available.\n</mykb-areas>\n',
-      };
+      areaBlock = '<mykb-areas>\nNo knowledge areas available.\n</mykb-areas>';
+    } else {
+      const areas: AreaMetadata[] = manifest.areas.map((a) => ({
+        id: a.id,
+        name: a.id,
+        summary: a.summary,
+        owner: a.owner,
+        tags: [],
+        created: '',
+        updated: a.updated,
+      }));
+
+      const index = renderAreaIndex(areas);
+      areaBlock = `<mykb-areas>\n${index}</mykb-areas>`;
     }
 
-    // Convert ManifestArea to AreaMetadata for rendering
-    const areas: AreaMetadata[] = manifest.areas.map((a) => ({
-      id: a.id,
-      name: a.id,
-      summary: a.summary,
-      owner: a.owner,
-      tags: [],
-      created: '',
-      updated: a.updated,
-    }));
-
-    const index = renderAreaIndex(areas);
     return {
-      systemPrompt: `<mykb-areas>\n${index}</mykb-areas>\n`,
+      systemPrompt: currentPrompt + '\n\n' + areaBlock + '\n',
     };
   };
 }

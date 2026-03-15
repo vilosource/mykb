@@ -23,7 +23,7 @@ function makeManifest(brainPath: string, areas: Array<{ id: string; summary: str
 }
 
 function makeAreaDir(brainPath: string, id: string, summary: string, tags: string[]): void {
-  const areaDir = path.join(brainPath, id);
+  const areaDir = path.join(brainPath, 'areas', id);
   fs.mkdirSync(areaDir, { recursive: true });
   fs.writeFileSync(
     path.join(areaDir, 'area.json'),

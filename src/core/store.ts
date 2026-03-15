@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { KnowledgeEntry, EntryType, TombstoneEntry } from './types.js';
 import { areaExists, createArea } from './area.js';
+import { regenerateManifest } from './manifest.js';
 
 const TYPE_TO_FILENAME: Record<EntryType, string> = {
   fact: 'facts.jsonl',
@@ -77,6 +78,7 @@ function resolveEntries(parsed: Array<KnowledgeEntry | TombstoneEntry>): Knowled
 export function appendEntry(brainPath: string, area: string, entry: KnowledgeEntry): void {
   if (!areaExists(brainPath, area)) {
     createArea(brainPath, area, area, '');
+    regenerateManifest(brainPath);
   }
   const filePath = resolveJsonlPath(brainPath, area, entry.type);
   ensureDirectory(filePath);
