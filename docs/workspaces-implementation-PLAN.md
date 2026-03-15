@@ -449,3 +449,16 @@ vfa session close
 | S1.4 Update phase | Uses kb_work_state | | |
 | S1.5 Add journal | Uses kb_work_journal | | |
 | S2.1 What phase? What last session? | "testing", both journal entries | | |
+
+## Retrospective
+
+After all phases are complete and acceptance tests pass, write a retrospective documenting:
+
+1. **What worked** — which parts of the process produced good results
+2. **What didn't work** — where time was wasted, what broke, what was harder than expected
+3. **What could be improved** — concrete changes for the next implementation plan
+4. **Metrics** — test counts, agent launches, bugs found, time spent per phase
+
+Save as `docs/workspaces-RETROSPECTIVE.md` in the mykb repo. Compare against the [core mykb retrospective](implementation-RETROSPECTIVE.md) to track whether recommendations were followed and whether they helped.
+
+This step is NOT optional — it's how we improve the process for the next feature.
