@@ -37,3 +37,22 @@ export {
 export { resolveBrainPath, brainExists } from './config.js';
 
 export { generateId } from './id.js';
+
+export {
+  appendEntry,
+  readEntries,
+  readAllEntries,
+  writeTombstone,
+  compactEntries,
+} from './store.js';
+
+export {
+  createArea,
+  readAreaMetadata,
+  updateAreaMetadata,
+  listAreas,
+  areaExists,
+  deleteArea,
+} from './area.js';
+
+export { regenerateManifest, readManifest } from './manifest.js';
