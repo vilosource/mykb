@@ -394,6 +394,13 @@ The `kb` CLI is focused on knowledge management only. No workspaces, journals, i
 | `kb stats` | Show knowledge statistics (counts by area, type, zone, provenance) |
 | `kb stale` | List facts past freshness threshold |
 
+#### Area Management
+| Command | Purpose |
+|---------|---------|
+| `kb area update <id> --summary "<text>"` | Update area metadata |
+| `kb area update <id> --owner "<name>"` | Update area owner |
+| `kb area delete <id>` | Remove an area and all its knowledge |
+
 #### Maintenance
 | Command | Purpose |
 |---------|---------|
@@ -404,11 +411,19 @@ The `kb` CLI is focused on knowledge management only. No workspaces, journals, i
 | `kb compact [<area>]` | Rewrite JSONL, collapse versions, remove tombstones |
 | `kb rebuild` | Rebuild SQLite cache from JSONL |
 
-#### Export
+#### Persistence
+| Command | Purpose |
+|---------|---------|
+| `kb save` | Commit all pending changes to git |
+| `kb save --push` | Commit and push to remote |
+| `kb save --message "<msg>"` | Commit with a custom message |
+
+#### Export & Import
 | Command | Purpose |
 |---------|---------|
 | `kb render <area>` | Render area as human-readable markdown |
 | `kb export agents-md` | Export area index as AGENTS.md format |
+| `kb import osb <path>` | Import areas from an OSB v1 brain directory |
 
 **Improvements over OSB v1:**
 - `kb promote` — explicit zone promotion (OSB had no API for this)
@@ -628,3 +643,111 @@ These replace the subprocess `osb add-fact`, `osb search`, etc. calls. The AI us
 | `/kb --all` | List all available areas |
 
 Note: `/kb` is a registered command, not a SKILL.md. Commands are handled by TypeScript code in the extension, not by the AI reading a markdown file. This ensures reliable invocation — no risk of the AI ignoring a skill description.
+
+### 11. Write Strategy: Dual-Write
+
+Every write operation does two things atomically:
+1. **Append to JSONL** (the source of truth, git-tracked)
+2. **UPSERT into SQLite** (the query cache)
+
+This means reads are always consistent — there's no window where JSONL has data that SQLite doesn't. The full rebuild from JSONL (`kb rebuild`) is only needed when:
+- `kb.db` doesn't exist (first run, fresh clone of brain repo)
+- `kb.db` is corrupted
+- JSONL was modified externally (e.g., `git pull` brought changes from another machine)
+
+**Stale cache detection:** On startup (CLI invocation or Pi extension `session_start`), compare the max mtime of all JSONL files against a `last_hydrated` timestamp stored in SQLite. If any JSONL file is newer, trigger a full rebuild. This handles the `git pull` case automatically.
+
+**SQLite WAL mode:** Enabled at database creation. WAL (Write-Ahead Logging) allows concurrent reads from CLI and extension without locking. Multiple readers, single writer.
+
+### 12. Git Commit Strategy
+
+Writes to JSONL happen immediately (so they're queryable). Git commits are **batched and explicit**.
+
+| Command | Purpose |
+|---------|---------|
+| `kb save` | Commit all pending JSONL/metadata changes to git with an auto-generated summary message |
+| `kb save --push` | Commit and push to remote |
+| `kb save --message "<msg>"` | Commit with a custom message |
+
+**Automatic save on session end:** The Pi extension's `session_shutdown` handler calls `kb save` automatically. This ensures no knowledge is left uncommitted between sessions.
+
+**What gets committed:** All modified files in the brain directory — JSONL files, area.json files, manifest.json. `kb.db` is gitignored and never committed.
+
+**Commit message format:**
+```
+kb: add 3 facts, 1 decision to ci-pipelines; verify 2 facts in networking
+```
+Auto-generated from a diff of JSONL changes since last commit.
+
+This mirrors OSB v1's explicit `osb save` model, with the improvement that writes are immediately queryable even before committing. The Pi extension adds automatic session-end saves so knowledge is never lost.
+
+### 13. Extension and CLI Shared Core
+
+The Pi extension and the `kb` CLI are both thin wrappers around a shared core library. Neither calls the other as a subprocess.
+
+```
+src/core/                ← shared library
+  store.ts                  JSONL read/write + SQLite UPSERT
+  db.ts                     SQLite + FTS5 queries
+  hydrate.ts                JSONL → SQLite full rebuild
+  types.ts                  shared type definitions
+  config.ts                 brain location resolution
+      ↑                          ↑
+src/cli/cli.ts           src/extension/index.ts
+  (thin wrapper)           (thin wrapper)
+  parses args →              registers tools/hooks →
+  calls core                 calls core
+      ↑                          ↑
+`kb` binary              Pi extension
+(user terminal)          (in-process, same Node.js)
+```
+
+**Why not subprocess:** The extension runs in Pi's Node.js process. Calling the CLI as a subprocess would mean spawning a new process, re-resolving the brain path, re-opening SQLite, and re-parsing args on every tool call. In-process calls to the core library are instant.
+
+**Concurrency:** The CLI and extension may access the same `kb.db` simultaneously (user runs `kb list` in a terminal while Pi is also querying). SQLite WAL mode handles this — multiple concurrent readers, writes are serialized.
+
+### 14. First-Run Experience
+
+**If the brain doesn't exist:**
+
+| Context | Behavior |
+|---------|----------|
+| `kb init` CLI | Creates `~/.mykb/`, initializes git repo, creates `.gitignore`, creates empty `manifest.json` |
+| `kb add` CLI (no brain) | Error: "Brain not found. Run `kb init` first." |
+| Pi extension `session_start` (no brain) | Auto-initialize: create brain directory, log a notification via `ctx.ui.notify("mykb: initialized brain at ~/.mykb/")` |
+| Pi registered tool `kb_add` (no brain) | Auto-initialize, then proceed with the add |
+
+**If an area doesn't exist:**
+
+When `kb add fact <area> "text"` is called and the area doesn't exist, **auto-create it** with:
+- `id` = the provided area name
+- `name` = area name with hyphens replaced by spaces, title-cased
+- `summary` = empty (user can update later via `kb area update <id> --summary "..."`)
+- `owner` = empty
+
+This is zero-friction — the user starts adding facts and areas materialize. No separate `kb init area` step required (though it's still available for explicit creation with metadata).
+
+### 15. OSB v1 Migration
+
+A separate `kb import` command converts an existing OSB brain to mykb format.
+
+```
+kb import osb ~/.osb/main/brain/
+```
+
+**Process:**
+1. Scan `areas/` directory for BRAIN.md files
+2. Parse each BRAIN.md: extract frontmatter, active/established facts, decisions, gotchas, patterns, links
+3. Convert each knowledge entry to JSONL format with:
+   - ID: nanoid (new, since OSB content-hashes aren't compatible)
+   - Provenance: preserved from OSB's `(verified:YYYY-MM-DD — source)` annotations
+   - Zone: mapped from OSB's `### Active` / `### Established` sections
+   - Tags: preserved from inline `#tag` syntax
+4. Write to `~/.mykb/areas/<id>/` with appropriate JSONL files
+5. Create `area.json` from OSB frontmatter (summary, owner, dates)
+6. Regenerate `manifest.json`
+7. Rebuild SQLite cache
+
+**Scope:** Areas only. Workspaces, journals, and container-specific data are not migrated — they belong to `osb`, not `kb`.
+
+**Not a core feature:** This is a one-time migration utility. It can be a separate script or a CLI subcommand, but it's not part of the extension or the core library.
