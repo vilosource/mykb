@@ -6,6 +6,25 @@ Parent: [design-status.md](design-status.md) | Manifesto: [development-MANIFESTO
 
 Bottom-up implementation. Each phase produces something testable and demonstrable. No phase depends on unreleased work from a later phase. Every phase follows the TDD manifesto: failing test first, then implementation.
 
+## Testing Layers
+
+Every phase has up to three testing layers:
+
+| Layer | What it tests | How | Who runs it |
+|-------|--------------|-----|-------------|
+| **Unit tests** | Code correctness — functions return expected values, errors thrown correctly | Vitest with mocks/fixtures | `npm test` (automated) |
+| **Integration tests** | Components wired correctly — CLI commands produce correct output and side effects | Vitest invoking real CLI + real JSONL/SQLite on temp dirs | `npm test` (automated) |
+| **LLM acceptance tests** | AI experience — does the AI actually use the knowledge, follow the redirect, answer correctly? | `vfa run` / `vfa session` with prompted scenarios, verify AI response content | Manual via vfa (human reviews result) |
+
+**LLM acceptance tests are not optional.** mykb's user is an AI. Unit tests verify the plumbing works. LLM tests verify the AI experience works. These catch things unit tests cannot:
+- Does the rendered markdown format work well for LLM consumption?
+- Does the AI actually USE injected context or ignore it?
+- Does the tool description make the AI choose the right tool?
+- Does the block reason redirect the AI effectively?
+- Does the AI understand the area summaries in Tier 1?
+
+LLM acceptance tests use `vfa run --provider pi --profile mykb-dev` and verify the `result` field in the JSON output contains the expected knowledge. They are run manually after each phase that touches the Pi extension or output formatting.
+
 ---
 
 ## Phase 0: Project Scaffold
@@ -63,6 +82,7 @@ Bottom-up implementation. Each phase produces something testable and demonstrabl
   - `readEntries(area, type)` — read all lines, resolve latest version per ID, exclude tombstones
   - `readAllEntries(area)` — read across all JSONL files for an area
   - `writeTombstone(area, id)` — append deletion marker
+  - `compactEntries(area, type?)` — rewrite JSONL: collapse to latest per ID, remove tombstones, remove superseded lines
 - `src/core/area.ts` — area management:
   - `createArea(id, name, summary)` — create directory + area.json
   - `readAreaMetadata(id)` — read area.json
@@ -82,6 +102,8 @@ Bottom-up implementation. Each phase produces something testable and demonstrabl
 - Regenerate manifest → matches area.json contents
 - Auto-create area directory + JSONL files on first write
 - Handle malformed JSONL lines (skip, don't crash)
+- Compact → JSONL has only latest version per ID, no tombstones
+- Compact is idempotent — running twice produces same result
 
 ---
 
@@ -188,8 +210,9 @@ Bottom-up implementation. Each phase produces something testable and demonstrabl
 - `src/cli/commands/stale.ts` — `kb stale`
 - `src/cli/commands/compact.ts` — `kb compact`
 - `src/cli/commands/rebuild.ts` — `kb rebuild`
-- `src/cli/commands/import.ts` — `kb import osb`
 - `src/cli/commands/export.ts` — `kb export agents-md`
+
+Note: `kb import osb` is deferred to post-M5. Parsing OSB's markdown BRAIN.md in TypeScript is complex (frontmatter, provenance regex, zone headers, multi-line facts). Not needed for the core product.
 
 **Tests:**
 - Integration tests: invoke CLI commands, verify stdout + file side effects
@@ -224,19 +247,29 @@ kb save
   - `session_start` → auto-init brain, dirty shutdown recovery, stale check, hydrate
   - `session_shutdown` → kb save (auto-commit)
 
-**Tests:**
-- Extension exports a valid default function
-- session_start with no brain → auto-initializes
-- session_start with dirty shutdown → recovery commit
-- session_start with stale cache → triggers hydration
+**Unit tests:**
+- session_start with no brain → calls initBrain
+- session_start with dirty shutdown → calls recoverDirtyShutdown
+- session_start with stale cache → calls hydrateDatabase
 - session_start with fresh cache → skips hydration
 - session_shutdown → calls save
+- State initializes with empty loaded areas set
 
-**Demo via vfa:**
-```
-vfa session start --provider pi --profile mykb-spike --prompt "What areas are available?"
+**LLM acceptance tests via vfa:**
+```bash
+# Test 1: Session starts cleanly, no errors
+vfa session start --provider pi --profile mykb-dev --prompt "Say hello"
+# Expected: AI responds normally, no extension errors in stderr
+
+# Test 2: Session end commits
 vfa session close
-# Verify: git log in ~/.mykb shows commits
+# Verify: git log in ~/.mykb shows commit
+
+# Test 3: Multi-turn session preserves state
+vfa session start --provider pi --profile mykb-dev --prompt "Add a fact to test-area: the sky is blue"
+vfa session send --prompt "Now search the knowledge base for sky"
+# Expected: AI finds the fact it just added
+vfa session close
 ```
 
 ---
@@ -252,21 +285,35 @@ vfa session close
 - `src/tools/kb-list.ts` — `kb_list` tool (list areas with summaries)
 - `src/tools/kb-verify.ts` — `kb_verify` tool (refresh provenance)
 
-**Tests:**
-- Each tool returns correct format
-- kb_add with non-existent area → auto-creates
-- kb_search returns ranked results
-- kb_load returns compact markdown
+**Unit tests:**
+- Each tool's execute function returns correct content format
+- kb_add with non-existent area → auto-creates area, returns ID
+- kb_search returns ranked results with area and type labels
+- kb_load returns compact markdown with provenance
 - kb_list returns area summaries
+- kb_verify updates provenance date
 
-**Demo via vfa:**
-```
-vfa run --provider pi --profile mykb-spike \
-  --prompt "Add a fact to the networking area: DNS uses CoreDNS with zone forwarding"
-# Verify: fact appears in JSONL
-vfa run --provider pi --profile mykb-spike \
-  --prompt "Search the knowledge base for DNS"
-# Verify: returns the fact we just added
+**LLM acceptance tests via vfa:**
+```bash
+# Test 1: AI chooses kb_add unprompted when asked to save knowledge
+vfa run --provider pi --profile mykb-dev \
+  --prompt "Remember that our API runs on port 8443. Save this to the api-gateway area."
+# Expected: AI uses kb_add tool, confirms the fact was saved
+
+# Test 2: AI uses kb_search when asked to find something
+vfa run --provider pi --profile mykb-dev \
+  --prompt "Do we have any knowledge about port 8443?"
+# Expected: AI uses kb_search, returns the fact from test 1
+
+# Test 3: AI uses kb_list to discover areas
+vfa run --provider pi --profile mykb-dev \
+  --prompt "What knowledge areas do we have?"
+# Expected: AI uses kb_list, shows area summaries
+
+# Test 4: Tool descriptions are clear enough that AI picks the right tool
+vfa run --provider pi --profile mykb-dev \
+  --prompt "Load everything we know about networking"
+# Expected: AI uses kb_load (not kb_search), returns full area
 ```
 
 ---
@@ -307,17 +354,38 @@ vfa run --provider pi --profile mykb-spike \
 - Scorer: multiple signals combine correctly
 - Scorer: empty brain → no injection, no error
 
-**Demo via vfa:**
-```
-# Seed some knowledge first via CLI
-kb add fact networking "DNS uses CoreDNS" --source "docs"
-kb add fact ci-pipelines "Runners use spot instances" --source "cloud-console"
+**LLM acceptance tests via vfa:**
+```bash
+# Pre-seed knowledge via CLI
+kb add fact networking "DNS uses CoreDNS with zone forwarding to 10.0.0.2" --source "docs"
+kb add fact ci-pipelines "Runners use spot instances with 60% cost savings" --source "cloud-console"
+kb add gotcha networking "NAT gateway has asymmetric routing" --source "debugging"
 
-# Test Tier 2: AI should know about networking without being told
-vfa run --provider pi --profile mykb-spike \
-  --workspace ~/some-terraform-project \
+# Test 1: Tier 1 — AI knows what areas exist without being told
+vfa run --provider pi --profile mykb-dev \
+  --prompt "What knowledge domains are available?"
+# Expected: AI lists networking, ci-pipelines (from system prompt index)
+
+# Test 2: Tier 2 — AI answers from auto-injected context
+vfa run --provider pi --profile mykb-dev \
   --prompt "What DNS setup do we use?"
-# Expected: AI answers from injected knowledge
+# Expected: AI answers "CoreDNS with zone forwarding" WITHOUT being told to load an area
+
+# Test 3: Tier 2 — AI uses gotchas in context
+vfa run --provider pi --profile mykb-dev \
+  --prompt "Are there any known issues with our NAT configuration?"
+# Expected: AI mentions asymmetric routing from injected gotcha
+
+# Test 4: Tier 3 — /kb command loads full area
+vfa session start --provider pi --profile mykb-dev --prompt "/kb networking"
+vfa session send --prompt "Tell me everything you know about our networking setup"
+# Expected: AI has full networking area in context, answers comprehensively
+vfa session close
+
+# Test 5: Tier 2 doesn't inject irrelevant areas
+vfa run --provider pi --profile mykb-dev \
+  --prompt "What is 2 + 2?"
+# Expected: AI answers 4, does NOT mention DNS or runners
 ```
 
 ---
@@ -368,19 +436,19 @@ vfa run --provider pi --profile mykb-spike \
 
 ## Phase Summary
 
-| Phase | What | Depends on | Testable? | Demonstrable? |
-|-------|------|-----------|-----------|---------------|
-| 0 | Scaffold | — | npm test passes | npm run build works |
-| 1 | Types + Config | 0 | Unit tests | — |
-| 2 | JSONL Store | 1 | Unit tests | — |
-| 3 | SQLite + FTS5 | 1 | Unit tests | — |
-| 4 | Core Facade | 2, 3 | Unit tests | — |
-| 5 | CLI | 4 | Integration tests | Full CLI workflow in terminal |
-| 6 | Extension Core | 4 | Unit tests | vfa session with auto-init |
-| 7 | Extension Tools | 4, 6 | Unit + vfa tests | AI adds and searches knowledge |
-| 8 | Three-Tier Delivery | 7 | Unit + vfa tests | AI answers from injected knowledge |
-| 9 | Tool Gating | 7 | Unit + vfa tests | AI blocked from editing .jsonl |
-| 10 | Packaging | all | Install test | `pi install` works |
+| Phase | What | Depends on | Unit tests | Integration tests | LLM acceptance tests |
+|-------|------|-----------|-----------|------------------|---------------------|
+| 0 | Scaffold | — | placeholder | — | — |
+| 1 | Types + Config | 0 | yes | — | — |
+| 2 | JSONL Store | 1 | yes | — | — |
+| 3 | SQLite + FTS5 | 1 | yes | — | — |
+| 4 | Core Facade | 2, 3 | yes | — | — |
+| 5 | CLI | 4 | — | yes (CLI commands) | — |
+| 6 | Extension Core | 4 | yes | — | yes (session lifecycle) |
+| 7 | Extension Tools | 4, 6 | yes | — | yes (AI uses tools correctly) |
+| 8 | Three-Tier Delivery | 7 | yes (scorer) | — | yes (AI answers from injected knowledge) |
+| 9 | Tool Gating | 7 | yes | — | yes (AI follows redirect) |
+| 10 | Packaging | all | — | yes (install) | yes (end-to-end) |
 
 ## Milestones
 
