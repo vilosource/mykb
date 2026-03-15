@@ -7,7 +7,12 @@ import { hydrateDatabase, isStale, ensureFresh } from '../../src/core/hydrate.js
 import { ProvenanceStatus, Zone } from '../../src/core/types.js';
 import type { KnowledgeEntry, TombstoneEntry, AreaMetadata } from '../../src/core/types.js';
 
-function writeJsonlEntry(brainPath: string, area: string, type: string, entry: KnowledgeEntry): void {
+function writeJsonlEntry(
+  brainPath: string,
+  area: string,
+  type: string,
+  entry: KnowledgeEntry,
+): void {
   const typeToFile: Record<string, string> = {
     fact: 'facts.jsonl',
     decision: 'decisions.jsonl',
@@ -115,7 +120,12 @@ describe('hydrateDatabase', () => {
   it('should handle tombstones by excluding deleted entries', async () => {
     await withTempBrain(async (brainPath) => {
       writeJsonlEntry(brainPath, 'networking', 'fact', makeEntry({ id: 'fact001' }));
-      writeJsonlEntry(brainPath, 'networking', 'fact', makeEntry({ id: 'fact002', text: 'Another fact' }));
+      writeJsonlEntry(
+        brainPath,
+        'networking',
+        'fact',
+        makeEntry({ id: 'fact002', text: 'Another fact' }),
+      );
       writeTombstone(brainPath, 'networking', 'fact', 'fact001');
 
       const db = createDatabase(':memory:');
@@ -131,7 +141,12 @@ describe('hydrateDatabase', () => {
 
   it('should handle latest-wins for same ID', async () => {
     await withTempBrain(async (brainPath) => {
-      writeJsonlEntry(brainPath, 'networking', 'fact', makeEntry({ id: 'fact001', text: 'old text' }));
+      writeJsonlEntry(
+        brainPath,
+        'networking',
+        'fact',
+        makeEntry({ id: 'fact001', text: 'old text' }),
+      );
       writeJsonlEntry(
         brainPath,
         'networking',
@@ -172,7 +187,10 @@ describe('hydrateDatabase', () => {
       const filePath = path.join(areaDir, 'facts.jsonl');
       fs.writeFileSync(filePath, JSON.stringify(makeEntry({ id: 'good001' })) + '\n');
       fs.appendFileSync(filePath, '{bad json line\n');
-      fs.appendFileSync(filePath, JSON.stringify(makeEntry({ id: 'good002', text: 'second fact' })) + '\n');
+      fs.appendFileSync(
+        filePath,
+        JSON.stringify(makeEntry({ id: 'good002', text: 'second fact' })) + '\n',
+      );
 
       const db = createDatabase(':memory:');
       hydrateDatabase(db, brainPath);
@@ -194,7 +212,9 @@ describe('isStale', () => {
 
       // Set last_hydrated to past
       const pastTime = new Date(Date.now() - 60000).toISOString();
-      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_hydrated', ?)").run(pastTime);
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_hydrated', ?)").run(
+        pastTime,
+      );
 
       // Create a JSONL file (mtime will be now, after last_hydrated)
       writeJsonlEntry(brainPath, 'networking', 'fact', makeEntry());
@@ -214,7 +234,9 @@ describe('isStale', () => {
 
       // Set last_hydrated to the future (well after the file was created)
       const futureTime = new Date(Date.now() + 60000).toISOString();
-      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_hydrated', ?)").run(futureTime);
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_hydrated', ?)").run(
+        futureTime,
+      );
 
       expect(isStale(db, brainPath)).toBe(false);
 
