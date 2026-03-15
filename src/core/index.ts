@@ -37,3 +37,19 @@ export {
 export { resolveBrainPath, brainExists } from './config.js';
 
 export { generateId } from './id.js';
+
+export {
+  createDatabase,
+  upsertEntry,
+  deleteEntry,
+  queryEntries,
+  searchEntries,
+  upsertArea,
+  listAreas,
+  getAreaStats,
+  getLastHydrated,
+  setLastHydrated,
+  type AreaStats,
+} from './db.js';
+
+export { hydrateDatabase, isStale, ensureFresh } from './hydrate.js';
