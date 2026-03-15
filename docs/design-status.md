@@ -35,7 +35,7 @@ Proven in production across 17 areas and 15 workspaces over months of daily use.
 |------|---------|
 | Fact | An atomic piece of learned knowledge |
 | Decision | An architectural choice with rationale and rejected alternatives |
-| Gotcha | A trap or surprising behavior. `[failed]` prefix for rejected approaches |
+| Gotcha | A trap or surprising behavior. Structured `failed` flag and `resolution` status |
 | Pattern | A reusable technique that worked |
 | Link | A pointer to an external resource |
 
@@ -160,6 +160,8 @@ Resolution chain:
 
 No walk-up-from-CWD. No per-project brains. One brain per machine, configurable via env var. This keeps it simple — knowledge is global, not project-scoped.
 
+The brain directory is a git repository. `kb init` creates the directory structure and runs `git init`. JSONL and metadata files are git-tracked. `kb.db` is gitignored.
+
 ### 2. Area Definition Format
 
 Each area is self-describing via a metadata file plus its JSONL data files. No central config needed for area definitions.
@@ -222,14 +224,14 @@ All knowledge entries share a common envelope with type-specific fields.
 ```json
 {
   "id": "a1b2c3d4",
-  "version": 1,
+  "area": "ci-pipelines",
   "type": "fact|decision|gotcha|pattern|link",
   "text": "The knowledge content",
   "tags": ["tag1", "tag2"],
   "provenance": {
     "status": "verified|unverified|stale|expires",
     "date": "2026-03-15",
-    "source": "azure-cli",
+    "source": "cli-output",
     "detail": "optional extra context"
   },
   "zone": "active|established|archive",
@@ -238,53 +240,56 @@ All knowledge entries share a common envelope with type-specific fields.
 }
 ```
 
-**ID generation:** First 8 characters of SHA-256 hash of `type + text` (content-addressable, stable across compactions). Same approach as OSB v1.
+**ID generation:** Random nanoid (8 characters, alphanumeric). Stable across text changes — updating a fact's text produces a new JSONL line with the same ID and a later timestamp. The latest line for a given ID wins (append-only ordering).
 
-**Version field:** Incremented on update. When two JSONL lines have the same `id`, the higher `version` wins.
+Note: OSB v1 used content-addressable hashing (SHA-256 of text) for compaction references. mykb uses stable random IDs instead because content-addressable IDs break when text is updated — the hash changes, creating a new ID instead of a new version.
+
+**`area` field:** Included in every JSONL entry so entries are self-contained and portable. Redundant with the directory path, but enables cross-area operations and future storage migrations without path dependency.
 
 **Type-specific fields:**
 
 **Fact** — no extra fields beyond the common envelope:
 ```json
-{"id":"a1b2c3d4","version":1,"type":"fact","text":"CI runners use autoscaling VM pools with spot instances","tags":["runners","cloud"],"provenance":{"status":"verified","date":"2026-03-15","source":"cloud-cli"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
+{"id":"a1b2c3d4","area":"ci-pipelines","type":"fact","text":"CI runners use autoscaling VM pools with spot instances","tags":["runners","cloud"],"provenance":{"status":"verified","date":"2026-03-15","source":"cloud-console"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
 ```
 
 **Decision** — adds `why`, `rejected`, `context`:
 ```json
-{"id":"b2c3d4e5","version":1,"type":"decision","text":"Use SQLite for query cache instead of PostgreSQL","tags":["storage"],"why":"No server dependency, embedded, rebuildable from JSONL","rejected":"PostgreSQL — requires running server, overkill for single-user","context":"Evaluated during storage format design","provenance":{"status":"verified","date":"2026-03-15","source":"design-review"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
+{"id":"b2c3d4e5","area":"ci-pipelines","type":"decision","text":"Use SQLite for query cache instead of PostgreSQL","tags":["storage"],"why":"No server dependency, embedded, rebuildable from JSONL","rejected":"PostgreSQL — requires running server, overkill for single-user","context":"Evaluated during storage format design","provenance":{"status":"verified","date":"2026-03-15","source":"design-review"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
 ```
 
 **Gotcha** — adds `failed` (boolean) and `resolution`:
 ```json
-{"id":"c3d4e5f6","version":1,"type":"gotcha","text":"npm lockfile bakes in registry URL from ~/.npmrc at install time","tags":["npm","docker"],"failed":false,"resolution":null,"provenance":{"status":"verified","date":"2026-03-15","source":"debugging"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
+{"id":"c3d4e5f6","area":"ci-pipelines","type":"gotcha","text":"npm lockfile bakes in registry URL from ~/.npmrc at install time","tags":["npm","docker"],"failed":false,"resolution":null,"provenance":{"status":"verified","date":"2026-03-15","source":"debugging"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
 ```
 
-`resolution` values: `null` (unresolved), `"resolved"`, `"mitigated"`, `"wontfix"`. Improvement over OSB v1's `[failed]` prefix — structured instead of text convention.
+`resolution` values: `null` (unresolved), `"resolved"`, `"mitigated"`, `"wontfix"`. Improvement over OSB v1's `[failed]` text prefix — structured field instead of text convention.
 
 **Pattern** — no extra fields:
 ```json
-{"id":"d4e5f6g7","version":1,"type":"pattern","text":"Plan/apply workflow: separate read phase from write phase with serializable plan file","tags":["workflow"],"provenance":{"status":"verified","date":"2026-03-15","source":"osb-audit"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
+{"id":"d4e5f6g7","area":"ci-pipelines","type":"pattern","text":"Plan/apply workflow: separate read phase from write phase with serializable plan file","tags":["workflow"],"provenance":{"status":"verified","date":"2026-03-15","source":"project-retrospective"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
 ```
 
 **Link** — adds `url`:
 ```json
-{"id":"e5f6g7h8","version":1,"type":"link","text":"Pipeline runner documentation","url":"https://docs.example.com/runners","tags":["runners","docs"],"provenance":{"status":"verified","date":"2026-03-15","source":"docs"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
+{"id":"e5f6g7h8","area":"ci-pipelines","type":"link","text":"Pipeline runner documentation","url":"https://docs.example.com/runners","tags":["runners","docs"],"provenance":{"status":"verified","date":"2026-03-15","source":"docs"},"zone":"active","created":"2026-03-15T10:30:00Z","updated":"2026-03-15T10:30:00Z"}
 ```
 
 **Tombstone** — marks deletion:
 ```json
-{"id":"a1b2c3d4","deleted":true,"updated":"2026-03-15T10:30:00Z"}
+{"id":"a1b2c3d4","area":"ci-pipelines","deleted":true,"updated":"2026-03-15T10:30:00Z"}
 ```
 
 ### 4. SQLite Schema
 
 Single database at `~/.mykb/kb.db`, gitignored, rebuilt from JSONL on startup.
 
+SQLite stores **current state only** — no version history. Versions exist in the JSONL append-only log. During hydration, later lines overwrite earlier lines for the same ID (UPSERT semantics). Tombstones result in no row.
+
 ```sql
--- Main knowledge table (all types in one table, type-specific fields nullable)
+-- Main knowledge table (current state only, all types in one table)
 CREATE TABLE entries (
-  id          TEXT NOT NULL,
-  version     INTEGER NOT NULL DEFAULT 1,
+  id          TEXT PRIMARY KEY,
   area        TEXT NOT NULL,
   type        TEXT NOT NULL CHECK(type IN ('fact','decision','gotcha','pattern','link')),
   text        TEXT NOT NULL,
@@ -305,27 +310,22 @@ CREATE TABLE entries (
   url         TEXT,
   -- Timestamps
   created     TEXT NOT NULL,
-  updated     TEXT NOT NULL,
-  deleted     INTEGER DEFAULT 0,
-  PRIMARY KEY (id, version)
+  updated     TEXT NOT NULL
 );
 
 -- Indexes for common queries
 CREATE INDEX idx_area ON entries(area);
 CREATE INDEX idx_type ON entries(area, type);
 CREATE INDEX idx_zone ON entries(area, zone);
-CREATE INDEX idx_tags ON entries(tags);  -- for LIKE '%"tag"%' queries
 CREATE INDEX idx_prov_status ON entries(prov_status);
 CREATE INDEX idx_prov_date ON entries(prov_date);
-CREATE INDEX idx_updated ON entries(updated);
 
--- Full-text search
+-- Full-text search (standalone, not external content — rebuilt during hydration)
 CREATE VIRTUAL TABLE entries_fts USING fts5(
+  id,
   text,
   tags,
-  area,
-  content=entries,
-  content_rowid=rowid
+  area
 );
 
 -- Area metadata
@@ -338,32 +338,23 @@ CREATE TABLE areas (
   created TEXT NOT NULL,
   updated TEXT NOT NULL
 );
-
--- View: latest version of each non-deleted entry
-CREATE VIEW current_entries AS
-SELECT e.*
-FROM entries e
-INNER JOIN (
-  SELECT id, MAX(version) as max_version
-  FROM entries
-  GROUP BY id
-) latest ON e.id = latest.id AND e.version = latest.max_version
-WHERE e.deleted = 0;
 ```
 
 **Hydration process:**
 1. On startup, check if `kb.db` exists
-2. If not (or if `--rebuild` flag), create schema and ingest all JSONL files
+2. If not (or if `--rebuild` flag), drop and recreate all tables
 3. For each area directory, read `area.json` → insert into `areas` table
-4. For each `*.jsonl` file, read lines → insert into `entries` table
-5. Build FTS5 index
+4. For each `*.jsonl` file, read lines in order:
+   - If tombstone (`deleted: true`): DELETE from `entries` where id matches
+   - Otherwise: UPSERT into `entries` (INSERT OR REPLACE) — later lines overwrite earlier
+5. After all entries loaded, populate `entries_fts` from `entries`
 6. Hydration is fast (~500ms for 5000 entries)
 
 **Key queries that need to be fast:**
-- All current facts for an area + zone: `SELECT * FROM current_entries WHERE area=? AND zone=?`
-- Facts by tag: `SELECT * FROM current_entries WHERE tags LIKE '%"tag"%'`
-- Full-text search: `SELECT * FROM entries_fts WHERE text MATCH ?`
-- Stale facts: `SELECT * FROM current_entries WHERE prov_status='verified' AND prov_date < date('now', '-30 days')`
+- All facts for an area + zone: `SELECT * FROM entries WHERE area=? AND zone=?`
+- Facts by tag: `SELECT * FROM entries WHERE tags LIKE '%"tag"%'`
+- Full-text search: `SELECT e.* FROM entries_fts f JOIN entries e ON f.id = e.id WHERE f.text MATCH ?`
+- Stale facts: `SELECT * FROM entries WHERE prov_status='verified' AND prov_date < date('now', '-30 days')`
 - Area summaries: `SELECT * FROM areas`
 
 ### 5. KB CLI Commands
@@ -566,8 +557,7 @@ The OSB v1 Go code is a reference for the knowledge model and algorithms, but we
     "kb": "./dist/cli.js"
   },
   "pi": {
-    "extensions": ["./dist/extension"],
-    "skills": ["./skills"]
+    "extensions": ["./dist/extension"]
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
@@ -607,9 +597,6 @@ mykb/
 │   │   ├── types.ts            # shared type definitions
 │   │   └── config.ts           # brain location, settings
 │   └── tools/                  # Pi-registered tools (kb_add, kb_search, etc.)
-├── skills/
-│   └── kb/
-│       └── SKILL.md            # /kb skill for on-demand area loading
 ├── dist/                       # compiled output
 ├── tests/
 └── tsconfig.json
@@ -632,10 +619,12 @@ mykb/
 
 These replace the subprocess `osb add-fact`, `osb search`, etc. calls. The AI uses them like any other tool — no bash command syntax to remember.
 
-**Registered commands:**
+**Registered commands** (via `pi.registerCommand()`):
 
 | Command | Purpose |
 |---------|---------|
 | `/kb [area...]` | Load one or more areas into context (Tier 3) |
 | `/kb` (no args) | Show what's currently loaded |
 | `/kb --all` | List all available areas |
+
+Note: `/kb` is a registered command, not a SKILL.md. Commands are handled by TypeScript code in the extension, not by the AI reading a markdown file. This ensures reliable invocation — no risk of the AI ignoring a skill description.
