@@ -41,18 +41,14 @@ These are identified risks and open questions. Each needs validation during impl
 
 ### Pi Integration
 
-**Will Pi's `context` event work as our Tier 2 delivery mechanism?**
-We've read the docs and seen examples, but haven't built a real extension that modifies the message array before every LLM call. Questions:
-- What's the actual latency overhead per turn?
-- Does injecting messages via `context` interfere with Pi's compaction/context management?
-- How does Pi handle the `context` event when multiple extensions modify messages?
-- What's the maximum message size we can inject before performance degrades?
+**~~Will Pi's `context` event work as our Tier 2 delivery mechanism?~~**
+VALIDATED (Spike 01). Yes — `context` event modifies the message array, AI sees and uses the injected facts. Latency overhead negligible (~4s total including container startup). Tested with z.ai provider. Remaining question: behavior with multiple extensions and different providers.
 
-**Will `tool_call` blocking actually redirect the AI?**
-Pi's docs say you can return `{block: true, reason: "Use kb_add instead"}`. But how does the AI react? Does it retry the blocked action? Switch to the suggested tool? Get confused? This needs testing with multiple models.
+**~~Will `tool_call` blocking actually redirect the AI?~~**
+VALIDATED (Spike 02). Yes — AI gets blocked, reads the reason message, and switches to the registered `kb_add` tool without being told. Does not retry or loop. Gotcha: property is `event.toolName` (camelCase), not `event.tool`. Remaining question: behavior across different LLM models/providers.
 
-**Does `better-sqlite3` work reliably inside Pi's Node.js process?**
-`better-sqlite3` is a native addon (C++ binding). Pi uses Node.js but may have restrictions on native modules. Need to verify it installs and runs correctly within a Pi package. Fallback: `sql.js` (pure WASM, no native code, but slower).
+**~~Does `better-sqlite3` work reliably inside Pi's Node.js process?~~**
+VALIDATED (Spike 03). Yes — native module loads, FTS5 extension available, queries return correct results. Host-compiled module (Node.js 20) works in Pi container (also Node.js 20). No `sql.js` fallback needed.
 
 ### Relevance Scoring
 
@@ -165,12 +161,12 @@ We're deferring this to Phase 2, which is correct — but it's the core value pr
 
 Based on this analysis, the highest-risk unknowns that should be validated earliest:
 
-| Priority | Risk | Validation approach |
-|----------|------|-------------------|
-| 1 | Pi `context` event works for knowledge injection | Build minimal extension, test with 2-3 providers |
-| 2 | `tool_call` blocking redirects the AI correctly | Test with Claude, GPT, Gemini — does the AI follow the redirect? |
-| 3 | `better-sqlite3` works inside Pi packages | Install test package, verify native module loads |
-| 4 | FTS5 BM25 matching is accurate enough | Run real prompts against real OSB area data, measure hit rate |
-| 5 | Context injection doesn't degrade reasoning | A/B test: same tasks with and without injected knowledge |
-| 6 | Different providers handle injected context consistently | Test injection format across 3+ providers |
-| 7 | Auto-area-creation UX (sprawl risk) | Prototype and observe in real usage |
+| Priority | Risk | Status | Result |
+|----------|------|--------|--------|
+| 1 | Pi `context` event works for knowledge injection | **VALIDATED** | Spike 01 PASS — AI answers from injected `<mykb-context>` block. Tested via vfa with z.ai provider. ~4s latency, ~$0.0006/query. |
+| 2 | `tool_call` blocking redirects the AI correctly | **VALIDATED** | Spike 02 PASS — AI gets blocked, reads the reason, switches to `kb_add` tool. Gotcha: property is `event.toolName` not `event.tool` (camelCase). |
+| 3 | `better-sqlite3` works inside Pi packages | **VALIDATED** | Spike 03 PASS — native module loads in Pi container (Node.js 20 on both host and container). FTS5 available and queries work. |
+| 4 | FTS5 BM25 matching is accurate enough | **PARTIALLY VALIDATED** | FTS5 works but is keyword-exact — "database" doesn't match "PostgreSQL". Need supplementary matching (area tags, synonyms) for broader recall. |
+| 5 | Context injection doesn't degrade reasoning | TODO | A/B test needed with real workloads |
+| 6 | Different providers handle injected context consistently | TODO | Only tested with z.ai (GLM). Need Anthropic, OpenAI, Google. |
+| 7 | Auto-area-creation UX (sprawl risk) | TODO | Prototype and observe in real usage |

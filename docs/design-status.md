@@ -147,6 +147,20 @@ From code review of the OSB v1 area implementation:
 7. **Gotchas lack resolution status** — `[failed]` prefix exists but no formal resolved/mitigated/wontfix
 8. **Hard to bulk-update** — changing provenance format across many facts requires scripting
 
+### Spike Validation Results (2026-03-15)
+
+Three spikes validated the architectural pillars. All tested via `vfa run --provider pi --profile mykb-spike`:
+
+| Spike | Result | Key learning |
+|-------|--------|-------------|
+| 01 Context injection | PASS | Pi's `context` event injects `<mykb-context>` blocks, AI uses them to answer questions |
+| 02 Tool gating | PASS | `tool_call` blocks .jsonl writes, AI reads the reason and switches to `kb_add` tool |
+| 03 SQLite in Pi | PASS | `better-sqlite3` native module + FTS5 works in Pi container (Node.js 20) |
+
+**Gotchas discovered:**
+- Pi's `tool_call` event uses camelCase: `event.toolName` not `event.tool` — first attempt failed silently
+- FTS5 is keyword-exact: searching "database" does not match "PostgreSQL" — BM25 is keyword-based, not semantic. Cross-area matching will need supplementary signals (area tags, fact tags) beyond raw FTS5
+
 ---
 
 ## Design Decisions
