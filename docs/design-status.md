@@ -199,7 +199,7 @@ Each area is self-describing via a metadata file plus its JSONL data files. No c
 }
 ```
 
-**manifest.json** — lightweight area index (auto-generated, like OSB's areas.md):
+**manifest.json** — lightweight area index (auto-generated on every area create/update/delete and during `kb rebuild`):
 ```json
 {
   "version": 1,
@@ -394,6 +394,14 @@ The `kb` CLI is focused on knowledge management only. No workspaces, journals, i
 | `kb stats` | Show knowledge statistics (counts by area, type, zone, provenance) |
 | `kb stale` | List facts past freshness threshold |
 
+#### Updating
+| Command | Purpose |
+|---------|---------|
+| `kb update <area> <id> --text "<new text>"` | Update fact text (appends new JSONL line with same ID) |
+| `kb update <area> <id> --tags "<t1>,<t2>"` | Update tags on an entry |
+| `kb update <area> <id> --zone <zone>` | Move entry to a different zone |
+| `kb update <area> <id> --source "<src>"` | Update provenance source |
+
 #### Area Management
 | Command | Purpose |
 |---------|---------|
@@ -421,9 +429,10 @@ The `kb` CLI is focused on knowledge management only. No workspaces, journals, i
 #### Export & Import
 | Command | Purpose |
 |---------|---------|
-| `kb render <area>` | Render area as human-readable markdown |
 | `kb export agents-md` | Export area index as AGENTS.md format |
 | `kb import osb <path>` | Import areas from an OSB v1 brain directory |
+
+Note: `kb load <area>` serves as the render command — outputs markdown by default, JSON with `--json`. No separate `render` command needed.
 
 **Improvements over OSB v1:**
 - `kb promote` — explicit zone promotion (OSB had no API for this)
@@ -519,7 +528,7 @@ Every N turns (configurable, default 5):
     - Prompt: "What new knowledge was discovered? Return structured facts."
   ↓
 If new facts returned:
-  - Write via kb CLI (kb add fact <area> "<text>")
+  - Write via core library (same in-process path as registered tools)
   - Log to session for transparency
 ```
 
@@ -634,6 +643,8 @@ mykb/
 
 These replace the subprocess `osb add-fact`, `osb search`, etc. calls. The AI uses them like any other tool — no bash command syntax to remember.
 
+**Tool output format:** Registered tools return **compact markdown** (same format as Tier 2 context injection). This is the most token-efficient format the AI can consume. The CLI `--json` flag is for programmatic/scripting use, not for AI consumption.
+
 **Registered commands** (via `pi.registerCommand()`):
 
 | Command | Purpose |
@@ -655,7 +666,7 @@ This means reads are always consistent — there's no window where JSONL has dat
 - `kb.db` is corrupted
 - JSONL was modified externally (e.g., `git pull` brought changes from another machine)
 
-**Stale cache detection:** On startup (CLI invocation or Pi extension `session_start`), compare the max mtime of all JSONL files against a `last_hydrated` timestamp stored in SQLite. If any JSONL file is newer, trigger a full rebuild. This handles the `git pull` case automatically.
+**Stale cache detection:** On startup (CLI invocation or Pi extension `session_start`), compare the max mtime of all tracked files (JSONL + area.json + manifest.json) against a `last_hydrated` timestamp stored in SQLite. If any file is newer, trigger a full rebuild. This handles the `git pull` case automatically — any externally modified file triggers re-sync.
 
 **SQLite WAL mode:** Enabled at database creation. WAL (Write-Ahead Logging) allows concurrent reads from CLI and extension without locking. Multiple readers, single writer.
 
