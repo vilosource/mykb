@@ -182,7 +182,28 @@ The Pi extension adds:
 
 ## What this does NOT replace
 
-- OSB container model (instances, sessions) — that's vfa
-- OSB observability (server, telemetry) — separate concern
-- OSB's Claude Code hooks — mykb uses Pi extension instead
-- osbctl — instance management, not knowledge
+- OSB observability (osb-server, telemetry, dashboard) — separate concern, out of scope
+
+## What vfa already replaces
+
+osbctl was OSB's container/instance manager. vfa fully replaces it:
+
+| osbctl capability | vfa equivalent |
+|-------------------|---------------|
+| Launch agent in container | `vfa run` / `vfa session start` |
+| Multi-turn sessions | `vfa session start/send/close/attach` |
+| Mount credentials | Provider config auth (config-dir, env, settings-json) |
+| Mount plugins/extensions | Profile `plugins` field |
+| Mount brain/knowledge | Profile `extra_volumes` field |
+| Custom images | Profile `image` override |
+| Interactive TTY | `vfa session attach` |
+| Per-instance brain branches | Not needed — mykb uses append-only JSONL + SQLite WAL (safe for concurrent access) |
+
+osbctl's per-instance brain branching was needed because OSB's markdown files had git merge conflicts on concurrent edits. mykb's JSONL is append-only and SQLite uses WAL mode — concurrent access is safe without branch isolation.
+
+No separate container management tool is needed. The full stack is:
+```
+vfa (container orchestration, already built)
+ └── Pi + mykb extension (knowledge + workspaces, already built)
+      └── mykb brain at ~/.mykb/ (mounted via extra_volumes)
+```
