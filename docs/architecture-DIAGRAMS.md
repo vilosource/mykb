@@ -147,6 +147,8 @@ This diagram shows the atomic dual-write strategy that ensures immediate consist
 flowchart LR
     START("🚀 kb_add tool called")
     VALIDATE("✅ Validate input")
+    AREACHECK{"📁 Area exists?"}
+    AREACREATE("📂 Create area<br/>area.json + dirs<br/>+ update manifest")
     GENERATE("🎲 Generate nanoid")
     APPEND("📝 Append to JSONL")
     UPSERT("💾 UPSERT SQLite")
@@ -154,7 +156,10 @@ flowchart LR
     CONFIRM("✅ Return ID + counts")
 
     START --> VALIDATE
-    VALIDATE --> GENERATE
+    VALIDATE --> AREACHECK
+    AREACHECK -->|"yes"| GENERATE
+    AREACHECK -->|"no"| AREACREATE
+    AREACREATE --> GENERATE
     GENERATE --> APPEND
     APPEND --> UPSERT
     UPSERT --> FTS
@@ -173,11 +178,14 @@ flowchart LR
     classDef storage fill:#26de81,stroke:#20bf6b,stroke-width:3px,color:#000
     classDef error fill:#ff6b6b,stroke:#ff4757,stroke-width:3px,color:#000
     classDef label fill:#f1f2f6,stroke:#dfe6e9,stroke-width:1px,color:#000
+    classDef decision fill:#ff9f43,stroke:#ff8c00,stroke-width:3px,color:#000
 
     class START,VALIDATE,GENERATE process
     class APPEND,UPSERT,FTS storage
     class ERROR error
     class GITLABEL,CACHELABEL label
+    class AREACHECK decision
+    class AREACREATE storage
 ```
 
 ## 4. Data Flow: Read Path (Three Tiers)
@@ -385,6 +393,7 @@ flowchart TB
     CONTEXT --> DB
     SCORER --> DB
     SCORER --> TYPES
+    SCORER --> STATE
     TOOLS --> STORE
     TOOLS --> DB
 
@@ -507,12 +516,16 @@ This diagram shows the complete lifecycle of a Pi session with mykb, from initia
 flowchart TB
     START("🚀 session_start event")
     AUTOINIT("🔧 Auto-init if needed<br/>create ~/.mykb/")
-    HYDRATE("💧 Hydrate SQLite<br/>from JSONL files")
+    DIRTYCHECK{"🔍 Dirty shutdown?<br/>uncommitted JSONL"}
+    RECOVERY("🩹 Recovery commit<br/>kb save with auto-message")
+    STALECHECK{"⏰ SQLite stale?<br/>mtime > last_hydrated"}
+    HYDRATE("💧 Full rebuild<br/>JSONL → SQLite")
+    SKIP("⚡ Skip hydration<br/>cache is current")
     TIER1("🥇 Inject Tier 1<br/>area index to system prompt")
 
     subgraph "🔄 Per Turn Cycle"
         CONTEXTEVENT("📥 context event")
-        SCORE("🎯 Score relevance<br/>files • commands • keywords")
+        SCORE("🎯 Score relevance<br/>signals + session state")
         TIER2("🥈 Inject Tier 2<br/>relevant facts")
     end
 
@@ -530,7 +543,16 @@ flowchart TB
     SAVE("💾 kb save<br/>git commit changes")
     END("✅ Session complete")
 
-    START --> AUTOINIT --> HYDRATE --> TIER1
+    START --> AUTOINIT
+    AUTOINIT --> DIRTYCHECK
+    DIRTYCHECK -->|"yes"| RECOVERY
+    DIRTYCHECK -->|"no"| STALECHECK
+    RECOVERY --> STALECHECK
+    STALECHECK -->|"yes"| HYDRATE
+    STALECHECK -->|"no"| SKIP
+    HYDRATE --> TIER1
+    SKIP --> TIER1
+
     TIER1 --> CONTEXTEVENT
     CONTEXTEVENT --> SCORE --> TIER2
     TIER2 --> CONTEXTEVENT
@@ -554,7 +576,11 @@ flowchart TB
     classDef ai fill:#a55eea,stroke:#8854d0,stroke-width:3px,color:#000
     classDef shutdown fill:#ff6b6b,stroke:#ff4757,stroke-width:3px,color:#000
 
-    class START,AUTOINIT,HYDRATE,TIER1 startup
+    classDef decision fill:#ff9f43,stroke:#ff8c00,stroke-width:3px,color:#000
+
+    class START,AUTOINIT,HYDRATE,SKIP,TIER1 startup
+    class DIRTYCHECK,STALECHECK decision
+    class RECOVERY shutdown
     class CONTEXTEVENT,SCORE,TIER2 cycle
     class KBCMD,TIER3 user
     class KBTOOL,DUALWRITE ai

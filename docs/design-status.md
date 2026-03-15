@@ -693,7 +693,11 @@ This means reads are always consistent — there's no window where JSONL has dat
 - `kb.db` is corrupted
 - JSONL was modified externally (e.g., `git pull` brought changes from another machine)
 
-**Stale cache detection:** On startup (CLI invocation or Pi extension `session_start`), compare the max mtime of all tracked files (JSONL + area.json + manifest.json) against a `last_hydrated` timestamp stored in SQLite. If any file is newer, trigger a full rebuild. This handles the `git pull` case automatically — any externally modified file triggers re-sync.
+**Stale cache detection:** On startup (CLI invocation or Pi extension `session_start`), compare the max mtime of all tracked files (JSONL + area.json + manifest.json) against a `last_hydrated` timestamp stored in SQLite. If any file is newer, trigger a full rebuild. This handles the `git pull` case automatically — any externally modified file triggers re-sync. If SQLite is current, skip hydration entirely (fast startup).
+
+**Dirty shutdown recovery:** On `session_start`, check if there are uncommitted JSONL changes in the brain git repo (modified files not yet committed). If found, this indicates a previous session died without running `kb save` (container killed, OOM, crash). The extension auto-commits these with a recovery message: `kb: recovery commit — uncommitted changes from previous session`. This is the "fsck on boot" pattern — detect dirty state and fix it before proceeding.
+
+**Accepted limitation:** If the container is killed (SIGKILL, OOM, docker kill), the `session_shutdown` handler never fires and `kb save` doesn't run. JSONL writes are safe (already on disk via dual-write), but the git commit doesn't happen. Data is NOT lost — it's in the JSONL files — but it's uncommitted until the next session's dirty shutdown recovery picks it up.
 
 **SQLite WAL mode:** Enabled at database creation. WAL (Write-Ahead Logging) allows concurrent reads from CLI and extension without locking. Multiple readers, single writer.
 
