@@ -63,16 +63,16 @@ Beads uses a similar hybrid:
 .kb/
 ├── manifest.json           # area index, metadata (git-tracked)
 ├── areas/
-│   ├── infra-cicd.jsonl    # one line per fact (git-tracked, append-only)
-│   ├── vault.jsonl
-│   └── stark.jsonl
+│   ├── ci-pipelines.jsonl  # one line per fact (git-tracked, append-only)
+│   ├── secrets.jsonl
+│   └── customer-acme.jsonl
 ├── kb.db                   # SQLite + FTS5 (gitignored, hydrated from JSONL)
 └── config.yaml             # area definitions, tags, relations
 ```
 
 Each JSONL line is a self-contained fact:
 ```json
-{"id":"a1b2c3d4","area":"infra-cicd","type":"fact","text":"GitLab runners use VMSS with spot instances","tags":["runners","azure"],"provenance":{"status":"verified","date":"2026-03-15","source":"azure-cli"},"zone":"active","created":"2026-03-10","updated":"2026-03-15"}
+{"id":"a1b2c3d4","area":"ci-pipelines","type":"fact","text":"CI runners use autoscaling VM pools with spot instances","tags":["runners","cloud"],"provenance":{"status":"verified","date":"2026-03-15","source":"cloud-cli"},"zone":"active","created":"2026-03-10","updated":"2026-03-15"}
 ```
 
 **Pros:**
@@ -129,9 +129,9 @@ Research findings on token efficiency:
 **Recommendation:** Store in JSONL (structured, queryable). Render to **compact markdown** for LLM injection:
 
 ```markdown
-## infra-cicd (Active)
-- GitLab runners use VMSS with spot instances #runners #azure (verified:2026-03-15)
-- Harbor registry at harbor.optiscangroup.com #registry (verified:2026-03-10)
+## ci-pipelines (Active)
+- CI runners use autoscaling VM pools with spot instances #runners #cloud (verified:2026-03-15)
+- Container registry at registry.example.com #registry (verified:2026-03-10)
 ```
 
 This is the most token-efficient output format while remaining readable. The storage format (JSONL) is invisible to the LLM.

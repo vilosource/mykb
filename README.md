@@ -39,7 +39,7 @@ mykb is built as a [Pi coding agent](https://github.com/badlogic/pi-mono) extens
 
 ### Knowledge Organization
 
-Knowledge is organized into **areas** — domains of expertise that accumulate facts over time. An area might be `infra-cicd`, `vault`, `networking`, or `customer-stark`. Areas have no end date — they grow as you learn.
+Knowledge is organized into **areas** — domains of expertise that accumulate facts over time. An area might be `ci-pipelines`, `secrets-management`, `networking`, or `customer-acme`. Areas have no end date — they grow as you learn.
 
 Each area contains **facts** — atomic units of knowledge, individually addressable, each with its own provenance, tags, and lifecycle zone.
 
@@ -78,7 +78,7 @@ mykb uses Pi's extension API to enforce the knowledge workflow mechanically, not
 
 | Term | Definition |
 |------|-----------|
-| **Area** | A domain of knowledge — a subject that accumulates facts over time. Examples: `infra-cicd`, `vault`, `networking`. No end date. |
+| **Area** | A domain of knowledge — a subject that accumulates facts over time. Examples: `ci-pipelines`, `secrets-management`, `networking`. No end date. |
 | **Fact** | The atomic unit of knowledge. A single piece of information with its own ID, tags, provenance, and zone. |
 | **Provenance** | Attribution of when and how a fact was verified. Statuses: `verified`, `unverified`, `stale`, `expires`. |
 | **Zone** | The lifecycle stage of a fact: `active` (recent, working set), `established` (stable, proven), `archive` (deprecated). |

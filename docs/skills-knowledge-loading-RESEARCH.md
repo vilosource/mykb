@@ -122,7 +122,7 @@ This is the most powerful — it modifies the actual message array that goes to 
 ```typescript
 pi.on("tool_result", async (event, ctx) => {
   if (event.toolName === "read" && isInfraFile(event.result)) {
-    queueKnowledgeForNextTurn("infra-iac");
+    queueKnowledgeForNextTurn("cloud-infra");
   }
 });
 ```
