@@ -33,6 +33,7 @@ vfa run --provider pi --workspace ./src --prompt "Review this code"
 
 # Multi-turn sessions
 vfa session start --provider pi --prompt "Let's build something"
+vfa session start --provider pi --profile mykb-spike --prompt "Test extension over turns"
 vfa session send --prompt "Now add tests"
 vfa session send --prompt "Run them"
 vfa session close
@@ -107,6 +108,65 @@ plugins:
 **The container user is `node` (UID 1000).** Extensions path inside the container is `/home/node/.pi/agent/extensions/`.
 
 **If the extension needs npm dependencies** (e.g., `better-sqlite3`), install them on the host first (`npm install` in the spike directory). The `node_modules/` gets mounted into the container along with the code. Host and container must share the same Node.js major version (both Node.js 20) for native modules to work.
+
+## Debugging Extensions
+
+Extension `console.error()` output goes to stderr. To see it:
+
+```bash
+# After a vfa run, check raw stderr
+cat ~/.vf-agents/runs/RUN_ID/raw_stderr.txt
+
+# Or check logs (shows stdout — may include Pi's own output)
+vfa logs RUN_ID
+```
+
+If an extension fails to load, Pi won't error — it silently skips it. Check stderr for `[spike-XX]` prefixed messages that confirm the extension loaded.
+
+## npm Install Gotcha
+
+The host `~/.npmrc` points to a company Nexus registry that's unreachable from WSL. Bypass it when installing extension dependencies:
+
+```bash
+npm install --registry https://registry.npmjs.org --userconfig /dev/null
+```
+
+## Result JSON Structure
+
+Every `vfa run` returns this JSON (printed to stdout):
+
+```json
+{
+  "run_id": "20260315-191642-pi-mykb-spike",
+  "provider_config": "pi",
+  "runtime": "pi",
+  "profile": "mykb-spike",
+  "timestamp": "2026-03-15T19:16:42+02:00",
+  "duration_seconds": 4.64,
+  "status": "completed",
+  "exit_code": 0,
+  "result": "The AI's text response",
+  "error": null,
+  "usage": {
+    "input_tokens": 426,
+    "output_tokens": 142,
+    "cache_read_input_tokens": 883
+  },
+  "cost_usd": 0.00066,
+  "workspace_path": "/tmp/vfa-workspace-XXXXXXXX"
+}
+```
+
+Key fields: `status` (completed/failed/error), `result` (AI response text), `usage` (token counts), `cost_usd`.
+
+## Locations
+
+- vfa binary: `~/.local/bin/vfa`
+- vfa source: `~/GitHub/vf-agents/`
+- Provider configs: `~/.vf-agents/providers/*.yaml`
+- Run profiles: `~/.vf-agents/profiles/*.yaml`
+- Run results: `~/.vf-agents/runs/*/`
+- Pi host auth: `~/.pi/agent/auth.json`
 
 ## Pi Container Details
 
