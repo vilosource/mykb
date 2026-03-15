@@ -2,6 +2,42 @@
 
 > Skills to work on the brain. Knowledge to work with.
 
+## Installation
+
+### As a Pi extension
+```bash
+pi install npm:@vilosource/mykb
+```
+
+### CLI only
+```bash
+npx @vilosource/mykb --help
+# or
+npm install -g @vilosource/mykb
+kb --help
+```
+
+## Quick Start
+
+```bash
+# Initialize a knowledge brain
+kb init
+
+# Add knowledge
+kb add fact networking "DNS uses CoreDNS with zone forwarding" --source "docs"
+kb add gotcha networking "NAT has asymmetric routing" --source "debugging"
+kb add decision ci-pipelines "Use spot instances for runners" --why "60% cost savings" --rejected "On-demand — too expensive"
+
+# Query knowledge
+kb load networking
+kb search "DNS"
+kb list
+kb stats
+
+# Save to git
+kb save
+```
+
 ## What is mykb?
 
 mykb is a knowledge management system for AI coding agents. It gives your AI persistent, structured, queryable knowledge that survives across sessions, providers, and machines.

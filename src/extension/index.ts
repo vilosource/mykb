@@ -11,6 +11,7 @@ import {
   createToolResultHandler,
   createInputHandler,
 } from './hooks/signals.js';
+import { createToolGatingHandler } from './hooks/tool-gating.js';
 import { createKbCommandHandler } from './hooks/kb-command.js';
 
 export default function (pi: ExtensionAPI): void {
@@ -30,8 +31,22 @@ export default function (pi: ExtensionAPI): void {
   // Tier 2 — Context injection on each turn
   pi.on('context', createContextHandler(store, state, brainPath));
 
+  // Tool gating — block direct edits to knowledge files
+  const gatingHandler = createToolGatingHandler(brainPath);
+  const signalHandler = createToolCallHandler(state);
+  pi.on('tool_call', async (...args: unknown[]): Promise<unknown> => {
+    // Run gating first — if blocked, return the block result
+    const event = args[0] as { tool: string; params: Record<string, unknown> };
+    const gatingResult = await gatingHandler({
+      toolName: event.tool,
+      input: event.params,
+    });
+    if (gatingResult) return gatingResult;
+    // Otherwise, collect signals
+    return signalHandler(...args);
+  });
+
   // Signal collection hooks
-  pi.on('tool_call', createToolCallHandler(state));
   pi.on('tool_result', createToolResultHandler(state));
   pi.on('input', createInputHandler(state));
 
