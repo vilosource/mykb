@@ -25,6 +25,88 @@ Every phase has up to three testing layers:
 
 LLM acceptance tests use `vfa run --provider pi --profile mykb-dev` and verify the `result` field in the JSON output contains the expected knowledge. They are run manually after each phase that touches the Pi extension or output formatting.
 
+## Phase Gates
+
+Before moving to the next phase, every phase must pass this checklist. No exceptions.
+
+**Code gate:**
+- [ ] All tests pass (`npm test`)
+- [ ] No `any` types in new code
+- [ ] Every public function has a test
+- [ ] Interfaces defined before implementations
+- [ ] Dependencies injected, not hardcoded
+- [ ] Error cases handled with domain-specific error classes
+- [ ] No dead code
+
+**TDD gate:**
+- [ ] Git log shows RED → GREEN → REFACTOR commit sequence
+- [ ] No implementation commits without a preceding test commit
+- [ ] Test names describe behavior, not implementation
+
+**LLM gate (phases 6+ only):**
+- [ ] All LLM acceptance tests pass via vfa
+- [ ] AI uses tools correctly without explicit instruction
+- [ ] No extension errors in container stderr
+
+## Test Isolation
+
+All tests use temporary directories for the brain. Never touch real `~/.mykb/`.
+
+```typescript
+// test helper pattern
+function withTempBrain(fn: (brainPath: string) => Promise<void>) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mykb-test-'));
+  process.env.MYKB_DIR = tmpDir;
+  try {
+    await fn(tmpDir);
+  } finally {
+    process.env.MYKB_DIR = undefined;
+    fs.rmSync(tmpDir, { recursive: true });
+  }
+}
+```
+
+Integration tests (CLI) set `MYKB_DIR` to a temp directory before invoking commands. This is the same pattern as vfa's `VFA_HOME` override.
+
+## vfa Profiles
+
+Two profiles for development:
+
+| Profile | Mounts | Use |
+|---------|--------|-----|
+| `mykb-spike` | `spikes/active-spike/` → Pi extensions | Spike experiments (already exists) |
+| `mykb-dev` | `dist/extension/` → Pi extensions | Real implementation testing (phases 6+) |
+
+`mykb-dev` profile must be created before Phase 6 starts. It mounts the compiled extension output.
+
+## Error Classes
+
+Defined in Phase 1 (`src/core/errors.ts`), used from Phase 2 onward:
+
+| Error | When |
+|-------|------|
+| `BrainNotInitializedError` | Brain directory doesn't exist and auto-init is not enabled |
+| `AreaNotFoundError` | Area ID doesn't exist (when auto-create is not applicable) |
+| `EntryNotFoundError` | Entry ID doesn't exist in the area |
+| `EntryValidationError` | Invalid entry data (missing required fields, bad type) |
+| `StoreCorruptionError` | Malformed JSONL line or inconsistent state |
+| `DatabaseError` | SQLite operation failed |
+
+## CLI Arg Parser
+
+Phase 5 uses **commander** (`commander` npm package) for argument parsing. Reasons:
+- Most popular TypeScript CLI framework
+- Declarative command/option definitions
+- Auto-generated help text
+- Subcommand support (`kb add fact`, `kb area update`)
+
+## CI
+
+Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
+- Trigger: push to develop, pull requests
+- Steps: install → lint → build → test
+- Node.js 20
+
 ---
 
 ## Phase 0: Project Scaffold
@@ -32,14 +114,16 @@ LLM acceptance tests use `vfa run --provider pi --profile mykb-dev` and verify t
 **Goal:** Empty project that builds, lints, and runs tests.
 
 **Deliverables:**
-- `package.json` with dependencies (better-sqlite3, nanoid, vitest)
+- `package.json` with dependencies (better-sqlite3, nanoid, vitest, commander)
 - `tsconfig.json` (strict mode, ESM)
 - Directory structure: `src/core/`, `src/cli/`, `src/extension/`, `src/tools/`
-- Vitest config, first placeholder test passes
+- Vitest config with test isolation helper (`withTempBrain`)
 - `.gitignore` (node_modules, dist, *.db)
 - Lint config (eslint + prettier with strict rules)
+- `.github/workflows/ci.yml` — lint → build → test on push/PR
+- Test helper utilities (`tests/helpers.ts`)
 
-**Tests:** `npm test` runs and passes (1 placeholder test).
+**Tests:** `npm test` runs and passes (1 placeholder test). CI runs on push.
 
 **Demo:** `npm run build` produces `dist/`.
 
@@ -63,9 +147,11 @@ LLM acceptance tests use `vfa run --provider pi --profile mykb-dev` and verify t
   - `resolveBrainPath()` — `$MYKB_DIR` → `~/.mykb/` fallback
   - `brainExists()` — check if brain directory is initialized
 - `src/core/id.ts` — nanoid generation wrapper
+- `src/core/errors.ts` — domain-specific error classes (see Error Classes section above)
 
 **Tests:**
 - Type validation (compile-time, no runtime tests needed)
+- Each error class has correct name and message format
 - `resolveBrainPath` with/without env var
 - `brainExists` with existing/missing directory
 - nanoid generation produces 8-char alphanumeric strings
@@ -164,6 +250,23 @@ LLM acceptance tests use `vfa run --provider pi --profile mykb-dev` and verify t
 - `src/core/render.ts` — output formatting:
   - `renderMarkdown(entries)` → compact markdown for LLM consumption
   - `renderJson(entries)` → JSON output
+  - `renderContextBlock(areaEntries)` → `<mykb-context>` wrapped markdown for Tier 2 injection
+  - `renderAreaIndex(areas)` → compact area summaries for Tier 1 system prompt
+
+  Markdown format (from design doc):
+  ```markdown
+  ## area-name (Active)
+  - fact text #tag1 #tag2 (verified:2026-03-15)
+  - another fact (unverified)
+  ```
+
+  Context block format:
+  ```markdown
+  <mykb-context>
+  ## area-name
+  - fact text #tag (verified:2026-03-15)
+  </mykb-context>
+  ```
 - `src/core/init.ts` — brain initialization:
   - `initBrain(path)` → create directory, git init, .gitignore, empty manifest
   - `isDirtyShutdown(path)` → check for uncommitted JSONL changes
