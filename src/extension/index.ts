@@ -5,6 +5,13 @@ import { MykbStore } from '../core/knowledge-store.js';
 import { SessionState } from './state.js';
 import { registerSessionHooks } from './hooks/session.js';
 import { registerTools } from '../tools/index.js';
+import { createContextHandler } from './hooks/context.js';
+import {
+  createToolCallHandler,
+  createToolResultHandler,
+  createInputHandler,
+} from './hooks/signals.js';
+import { createKbCommandHandler } from './hooks/kb-command.js';
 
 export default function (pi: ExtensionAPI): void {
   const brainPath = resolveBrainPath();
@@ -17,7 +24,20 @@ export default function (pi: ExtensionAPI): void {
   const store = MykbStore.open(brainPath);
   const state = new SessionState();
 
+  // Session lifecycle hooks (includes Tier 1 — before_agent_start area index)
   registerSessionHooks(pi, store, state, brainPath);
+
+  // Tier 2 — Context injection on each turn
+  pi.on('context', createContextHandler(store, state, brainPath));
+
+  // Signal collection hooks
+  pi.on('tool_call', createToolCallHandler(state));
+  pi.on('tool_result', createToolResultHandler(state));
+  pi.on('input', createInputHandler(state));
+
+  // Tier 3 — /kb command for on-demand area loading
+  pi.registerCommand('kb', createKbCommandHandler(store, state));
+
+  // Register tools
   registerTools(pi, store, brainPath);
-  // registerCommands — placeholder for Phase 8
 }

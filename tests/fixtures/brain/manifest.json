@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "areas": [
+    {
+      "id": "networking",
+      "summary": "Network configuration, DNS, VPN, firewall rules and load balancers",
+      "owner": "netops",
+      "updated": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "ci-pipelines",
+      "summary": "CI/CD pipelines, GitHub Actions, GitLab CI, build automation and deployment",
+      "owner": "devops",
+      "updated": "2026-03-12T00:00:00.000Z"
+    },
+    {
+      "id": "secrets",
+      "summary": "Secret management, vault, key rotation, certificates and credentials",
+      "owner": "security",
+      "updated": "2026-03-14T00:00:00.000Z"
+    }
+  ]
+}
