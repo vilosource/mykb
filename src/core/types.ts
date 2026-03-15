@@ -1,0 +1,158 @@
+// --- Enums ---
+
+export enum ProvenanceStatus {
+  Verified = 'verified',
+  Unverified = 'unverified',
+  Stale = 'stale',
+  Expires = 'expires',
+}
+
+export enum Zone {
+  Active = 'active',
+  Established = 'established',
+  Archive = 'archive',
+}
+
+// --- Value types ---
+
+export type EntryType = 'fact' | 'decision' | 'gotcha' | 'pattern' | 'link';
+
+export type ResolutionStatus = null | 'resolved' | 'mitigated' | 'wontfix';
+
+export type Provenance = {
+  status: ProvenanceStatus;
+  date?: string;
+  source?: string;
+  detail?: string;
+};
+
+// --- Knowledge entry types ---
+
+export type KnowledgeEntry = {
+  id: string;
+  area: string;
+  type: EntryType;
+  text: string;
+  tags: string[];
+  provenance: Provenance;
+  zone: Zone;
+  created: string;
+  updated: string;
+};
+
+export type FactEntry = KnowledgeEntry & {
+  type: 'fact';
+};
+
+export type DecisionEntry = KnowledgeEntry & {
+  type: 'decision';
+  why?: string;
+  rejected?: string;
+  context?: string;
+};
+
+export type GotchaEntry = KnowledgeEntry & {
+  type: 'gotcha';
+  failed: boolean;
+  resolution: ResolutionStatus;
+};
+
+export type PatternEntry = KnowledgeEntry & {
+  type: 'pattern';
+};
+
+export type LinkEntry = KnowledgeEntry & {
+  type: 'link';
+  url: string;
+};
+
+export type TombstoneEntry = {
+  id: string;
+  area: string;
+  deleted: true;
+  updated: string;
+};
+
+// --- Metadata types ---
+
+export type AreaMetadata = {
+  id: string;
+  name: string;
+  summary: string;
+  owner: string;
+  tags: string[];
+  created: string;
+  updated: string;
+};
+
+export type ManifestArea = {
+  id: string;
+  summary: string;
+  owner: string;
+  updated: string;
+};
+
+export type ManifestFile = {
+  version: number;
+  areas: ManifestArea[];
+};
+
+// --- Filter types ---
+
+export type EntryFilter = {
+  area?: string;
+  type?: EntryType;
+  zone?: Zone;
+  tags?: string[];
+  provStatus?: ProvenanceStatus;
+  search?: string;
+};
+
+// --- Option types for add methods ---
+
+export type AddEntryOptions = {
+  tags?: string[];
+  zone?: Zone;
+  provenance?: Provenance;
+};
+
+export type AddFactOptions = AddEntryOptions;
+
+export type AddDecisionOptions = AddEntryOptions & {
+  why?: string;
+  rejected?: string;
+  context?: string;
+};
+
+export type AddGotchaOptions = AddEntryOptions & {
+  failed?: boolean;
+  resolution?: ResolutionStatus;
+};
+
+export type AddPatternOptions = AddEntryOptions;
+
+export type AddLinkOptions = AddEntryOptions;
+
+// --- Service interfaces ---
+
+export interface KnowledgeStore {
+  addFact(area: string, text: string, options?: AddFactOptions): string;
+  addDecision(area: string, text: string, options?: AddDecisionOptions): string;
+  addGotcha(area: string, text: string, options?: AddGotchaOptions): string;
+  addPattern(area: string, text: string, options?: AddPatternOptions): string;
+  addLink(area: string, text: string, url: string, options?: AddLinkOptions): string;
+  updateEntry(area: string, id: string, updates: Partial<KnowledgeEntry>): void;
+  deleteEntry(area: string, id: string): void;
+  verifyEntry(area: string, id: string): void;
+  promoteEntry(area: string, id: string): void;
+  archiveEntry(area: string, id: string): void;
+  loadArea(area: string, filter?: EntryFilter): KnowledgeEntry[];
+  search(query: string): KnowledgeEntry[];
+  matchAreas(text: string): { area: string; score: number }[];
+  compact(area?: string): void;
+}
+
+export interface SearchEngine {
+  searchEntries(query: string): KnowledgeEntry[];
+  matchAreas(text: string): { area: string; score: number }[];
+}
