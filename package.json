@@ -9,6 +9,11 @@
   "bin": {
     "kb": "./dist/cli/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "pi": {
     "extensions": [
       "./dist/extension"
