@@ -53,3 +53,30 @@ export {
 } from './db.js';
 
 export { hydrateDatabase, isStale, ensureFresh } from './hydrate.js';
+
+export {
+  appendEntry,
+  readEntries,
+  readAllEntries,
+  writeTombstone,
+  compactEntries,
+} from './store.js';
+
+export {
+  createArea,
+  readAreaMetadata,
+  updateAreaMetadata,
+  listAreas as listAreaDirs,
+  areaExists,
+  deleteArea,
+} from './area.js';
+
+export { regenerateManifest, readManifest } from './manifest.js';
+
+export { MykbStore } from './knowledge-store.js';
+
+export { renderMarkdown, renderContextBlock, renderAreaIndex, renderJson } from './render.js';
+
+export { initBrain, isDirtyShutdown, recoverDirtyShutdown } from './init.js';
+
+export { save, saveAndPush } from './save.js';
