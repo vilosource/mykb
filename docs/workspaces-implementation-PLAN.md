@@ -54,7 +54,10 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
    - RED: test `unlinkArea(brainPath, id, area)` removes area
    - RED: test `listWorkspaces(brainPath)` returns all workspaces
    - RED: test `archiveWorkspace(brainPath, id)` moves to `workspaces/archive/`
-   - RED: test `getActiveWorkspace(brainPath)` / `setActiveWorkspace(brainPath, id)` — tracks which workspace is active via `workspaces/.active` file
+   - RED: test `getActiveWorkspace(brainPath)` / `setActiveWorkspace(brainPath, id)` / `clearActiveWorkspace(brainPath)` — tracks which workspace is active via `workspaces/.active` file
+   - RED: test `updateWorkspaceState` with `Partial<WorkspaceState>` — updating only `phase` preserves `active`, `blocked`, `next`
+   - RED: test `createWorkspace` auto-creates `workspaces/` directory if it doesn't exist
+   - RED: test `readWorkspace` when linked area doesn't exist in mykb — returns workspace normally (area existence is not validated at read time, only at load/boost time)
    - GREEN: implement each
    - Table-driven tests for state update (phase only, active only, multiple fields)
    Commits: `test: workspace CRUD` → `feat: implement workspace storage`
@@ -66,7 +69,22 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
    - GREEN: implement
    Commits: `test: journal append and read` → `feat: implement journal`
 
-4. **Barrel exports.** Update `src/core/index.ts`.
+4. **Workspace rendering.** File: `src/core/render.ts` (extend). Test: `tests/core/render.test.ts` (extend)
+   - RED: test `renderWorkspace(workspace, journalEntries)` produces formatted output:
+     ```
+     # My Project (my-project)
+     Phase: building | Active: setting up CI | Blocked: none | Next: deploy to staging
+     Areas: networking, ci-pipelines
+     Links: JIRA STARK-653 | Wiki: https://...
+
+     ## Recent Journal
+     - 2026-03-15: Previous session: configured DNS
+     - 2026-03-14: Set up CI pipeline
+     ```
+   - GREEN: implement
+   Commits: `test: workspace rendering` → `feat: implement renderWorkspace`
+
+5. **Barrel exports.** Update `src/core/index.ts`.
    Commit: `feat: export workspace and journal modules`
 
 **Deliverables:**
@@ -81,7 +99,10 @@ All tests use `withTempBrain`. Workspace files live inside the brain directory a
 - Link/unlink area → areas array modified
 - List workspaces → returns all
 - Archive → moved to archive/ subdirectory
-- Active workspace → set/get persists across calls
+- Active workspace → set/get/clear persists across calls
+- Create workspace auto-creates workspaces/ directory
+- Partial state update → only specified fields change, others preserved
+- Render workspace → formatted markdown output
 - Journal append → new entry in JSONL
 - Journal read with limit → returns last N
 - Journal read empty → returns []
@@ -158,7 +179,8 @@ kb work stop
    Commit: `test: session start loads workspace` → `feat: workspace context on session start`
 
 2. **Session shutdown workspace save.** Extend `session_shutdown`:
-   - If active workspace: update workspace `updated` timestamp
+   - If active workspace: update workspace `updated` timestamp, call `kb save`
+   - Journal entries are NOT auto-generated at shutdown — the AI writes them explicitly during the session via `kb_work_journal` tool. This avoids the OSB v1 problem where the Stop hook forced an AI-generated summary that was often low quality.
    Commit: `test: session shutdown saves workspace` → `feat: auto-save workspace on shutdown`
 
 3. **Registered tools.**
@@ -238,19 +260,22 @@ After all 3 phases are merged and the bundle is rebuilt, run this full workflow 
 ### Setup
 
 ```bash
-# Seed knowledge areas
+# Build first
+cd ~/GitHub/mykb && npm run build
+
+# Seed knowledge areas (use node dist/cli/cli.js since kb may not be on PATH)
 export MYKB_DIR=/tmp/mykb-e2e
-kb init
-kb add fact networking "DNS uses CoreDNS with zone forwarding" --source "docs"
-kb add gotcha networking "NAT has asymmetric routing" --source "debugging"
-kb add fact ci-pipelines "Runners use spot instances" --source "cloud-console"
+node dist/cli/cli.js init
+node dist/cli/cli.js add fact networking "DNS uses CoreDNS with zone forwarding" --source "docs"
+node dist/cli/cli.js add gotcha networking "NAT has asymmetric routing" --source "debugging"
+node dist/cli/cli.js add fact ci-pipelines "Runners use spot instances" --source "cloud-console"
 
 # Create and activate workspace
-kb work create myproject "My Project" --areas networking,ci-pipelines
-kb work start myproject
-kb work state --phase "building" --active "setting up CI"
-kb work journal "Previous session: configured DNS"
-kb save
+node dist/cli/cli.js work create myproject "My Project" --areas networking,ci-pipelines
+node dist/cli/cli.js work start myproject
+node dist/cli/cli.js work state --phase "building" --active "setting up CI"
+node dist/cli/cli.js work journal "Previous session: configured DNS"
+node dist/cli/cli.js save
 unset MYKB_DIR
 ```
 
