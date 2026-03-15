@@ -2,8 +2,19 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { withTempBrain } from '../helpers.js';
-import { appendEntry, readEntries, readAllEntries, writeTombstone, compactEntries } from '../../src/core/store.js';
-import { type KnowledgeEntry, type TombstoneEntry, ProvenanceStatus, Zone } from '../../src/core/types.js';
+import {
+  appendEntry,
+  readEntries,
+  readAllEntries,
+  writeTombstone,
+  compactEntries,
+} from '../../src/core/store.js';
+import {
+  type KnowledgeEntry,
+  type TombstoneEntry,
+  ProvenanceStatus,
+  Zone,
+} from '../../src/core/types.js';
 
 function makeFactEntry(overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry {
   return {
