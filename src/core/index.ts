@@ -33,3 +33,5 @@ export {
   StoreCorruptionError,
   DatabaseError,
 } from './errors.js';
+
+export { resolveBrainPath, brainExists } from './config.js';
