@@ -133,28 +133,27 @@ Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
 
 **Goal:** Type definitions and brain location resolution.
 
+**SOLID focus:** Interface Segregation + Dependency Inversion — define ALL interfaces before any implementation exists. These interfaces are the contracts that every subsequent phase depends on.
+
+**Development process:**
+1. **Interfaces first (no implementation).** Write `KnowledgeStore`, `SearchEngine`, `EntryFilter` interfaces in `types.ts`. These define the contracts for Phases 2-4. Commit: `feat: define core interfaces`
+2. **Types and enums.** Define `KnowledgeEntry`, `FactEntry`, `DecisionEntry`, `GotchaEntry`, `PatternEntry`, `LinkEntry`, `Provenance`, `ProvenanceStatus`, `Zone`, `AreaMetadata`, `ManifestFile`. Commit: `feat: define domain types`
+3. **Error classes.** RED: write tests that construct each error and verify name/message. GREEN: implement error classes. Commit: `test: error class construction` → `feat: implement domain errors`
+4. **Config.** RED: write tests for `resolveBrainPath` with/without env var, `brainExists` with existing/missing dir. GREEN: implement. Commit: `test: brain path resolution` → `feat: implement config`
+5. **ID generation.** RED: test nanoid produces 8-char alphanumeric. GREEN: implement wrapper. Commit: `test: nanoid generation` → `feat: implement id generator`
+
 **Deliverables:**
-- `src/core/types.ts` — all interfaces and types:
-  - `KnowledgeEntry` (common envelope), `FactEntry`, `DecisionEntry`, `GotchaEntry`, `PatternEntry`, `LinkEntry`
-  - `Provenance`, `ProvenanceStatus` enum
-  - `Zone` enum
-  - `AreaMetadata`
-  - `ManifestFile`
-  - `KnowledgeStore` interface
-  - `SearchEngine` interface
-  - `EntryFilter` type
-- `src/core/config.ts` — brain location resolution:
-  - `resolveBrainPath()` — `$MYKB_DIR` → `~/.mykb/` fallback
-  - `brainExists()` — check if brain directory is initialized
+- `src/core/types.ts` — all interfaces and types
+- `src/core/config.ts` — brain location resolution
 - `src/core/id.ts` — nanoid generation wrapper
-- `src/core/errors.ts` — domain-specific error classes (see Error Classes section above)
+- `src/core/errors.ts` — domain-specific error classes
 
 **Tests:**
-- Type validation (compile-time, no runtime tests needed)
+- Type validation (compile-time)
 - Each error class has correct name and message format
-- `resolveBrainPath` with/without env var
+- `resolveBrainPath` with/without env var (table-driven: 3 cases)
 - `brainExists` with existing/missing directory
-- nanoid generation produces 8-char alphanumeric strings
+- nanoid generation produces 8-char alphanumeric strings, uniqueness across 100 calls
 
 ---
 
@@ -162,31 +161,32 @@ Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
 
 **Goal:** Read and write knowledge entries to JSONL files.
 
-**Deliverables:**
-- `src/core/store.ts` — JSONL operations:
-  - `appendEntry(area, entry)` — append JSON line to type-specific JSONL file
-  - `readEntries(area, type)` — read all lines, resolve latest version per ID, exclude tombstones
-  - `readAllEntries(area)` — read across all JSONL files for an area
-  - `writeTombstone(area, id)` — append deletion marker
-  - `compactEntries(area, type?)` — rewrite JSONL: collapse to latest per ID, remove tombstones, remove superseded lines
-- `src/core/area.ts` — area management:
-  - `createArea(id, name, summary)` — create directory + area.json
-  - `readAreaMetadata(id)` — read area.json
-  - `updateAreaMetadata(id, updates)` — update area.json fields
-  - `listAreas()` — scan areas/ directory, read each area.json
-  - `areaExists(id)` — check if area directory exists
-- `src/core/manifest.ts` — manifest generation:
-  - `regenerateManifest()` — scan all area.json files, write manifest.json
-  - `readManifest()` — read manifest.json
+**SOLID focus:** Single Responsibility — `store.ts` does JSONL I/O only. `area.ts` does area metadata only. `manifest.ts` does index generation only. Three files, three responsibilities.
 
-**Tests:**
+**Pattern:** Repository — `store.ts` is the first concrete implementation behind the `KnowledgeStore` interface's read/write methods (the facade in Phase 4 will compose it with the DB).
+
+**Development process:**
+1. **Store — append.** RED: test that `appendEntry` creates JSONL file and writes one line. GREEN: implement. Use `withTempBrain` for test isolation. Commit: `test: appendEntry` → `feat: implement appendEntry`
+2. **Store — read.** RED: test that `readEntries` returns appended entry. Then test latest-wins with same ID. Then test tombstone exclusion. GREEN: implement each. Table-driven tests for the 3 cases. Commit: `test: readEntries cases` → `feat: implement readEntries`
+3. **Store — compact.** RED: test compact collapses versions and removes tombstones. Test idempotency. GREEN: implement. Commit: `test: compactEntries` → `feat: implement compactEntries`
+4. **Store — malformed lines.** RED: test that malformed JSON line is skipped (logged, not crashed). GREEN: implement. Commit: `test: malformed JSONL handling` → `feat: handle malformed lines`
+5. **Area — CRUD.** RED: test `createArea`, `readAreaMetadata`, `updateAreaMetadata`, `listAreas`, `areaExists`. GREEN: implement each. Commit: `test: area CRUD` → `feat: implement area management`
+6. **Manifest.** RED: test `regenerateManifest` produces correct JSON from area.json files. Test `readManifest`. GREEN: implement. Commit: `test: manifest generation` → `feat: implement manifest`
+7. **Auto-create.** RED: test that `appendEntry` to non-existent area creates the area directory first. GREEN: implement. Commit: `test: auto-create area on write` → `feat: auto-create area`
+
+**Deliverables:**
+- `src/core/store.ts` — JSONL operations (append, read, tombstone, compact)
+- `src/core/area.ts` — area management (create, read, update, list, exists)
+- `src/core/manifest.ts` — manifest generation (regenerate, read)
+
+**Tests (all use `withTempBrain`):**
 - Append entry → read it back → matches
 - Append two entries with same ID → readEntries returns latest only
 - Tombstone → entry disappears from readEntries
 - Create area → directory + area.json exist
 - List areas → returns all area metadata
 - Regenerate manifest → matches area.json contents
-- Auto-create area directory + JSONL files on first write
+- Auto-create area directory on first write
 - Handle malformed JSONL lines (skip, don't crash)
 - Compact → JSONL has only latest version per ID, no tombstones
 - Compact is idempotent — running twice produces same result
@@ -197,29 +197,31 @@ Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
 
 **Goal:** Query cache with full-text search, hydration from JSONL.
 
-**Deliverables:**
-- `src/core/db.ts` — SQLite interface:
-  - `createDatabase(path)` — create schema, enable WAL mode
-  - `upsertEntry(entry)` — INSERT OR REPLACE
-  - `deleteEntry(id)` — DELETE by ID
-  - `queryEntries(filter)` — query by area, type, zone, tags, provenance status
-  - `searchEntries(query)` — FTS5 MATCH with BM25 ranking
-  - `getAreaStats(area)` — count by type
-  - `upsertArea(metadata)` — area metadata
-  - `listAreas()` — all area metadata
-  - `getLastHydrated()` / `setLastHydrated()` — staleness tracking timestamp
-- `src/core/hydrate.ts` — JSONL → SQLite rebuild:
-  - `hydrateDatabase(db, brainPath)` — full rebuild from all JSONL files
-  - `isStale(db, brainPath)` — compare file mtimes against last_hydrated
-  - `ensureFresh(db, brainPath)` — hydrate only if stale
+**SOLID focus:** Single Responsibility — `db.ts` does SQLite queries. `hydrate.ts` does JSONL→SQLite sync. Interface Segregation — `db.ts` implements `SearchEngine` interface from Phase 1 (only the search methods, not the write methods).
 
-**Tests:**
+**Pattern:** Factory — `createDatabase()` handles schema creation, WAL mode, FTS5 setup. Callers receive a ready-to-use database object.
+
+**Development process:**
+1. **Schema creation.** RED: test `createDatabase` produces tables with correct columns, WAL enabled. GREEN: implement with full SQL from design doc. Commit: `test: database schema creation` → `feat: implement createDatabase`
+2. **Entry CRUD.** RED: test upsert → query, upsert same ID → latest wins, delete → gone. Table-driven. GREEN: implement. Commit: `test: entry CRUD` → `feat: implement entry operations`
+3. **FTS5 search.** RED: seed entries, test `searchEntries("keyword")` returns matches ranked by BM25. Test empty results. GREEN: implement. Commit: `test: FTS5 search` → `feat: implement searchEntries`
+4. **Query filters.** RED: test `queryEntries` with area, type, zone, tags, provenance status filters. Table-driven with multiple filter combinations. GREEN: implement. Commit: `test: query filters` → `feat: implement queryEntries`
+5. **Area metadata.** RED: test `upsertArea`, `listAreas`, `getAreaStats`. GREEN: implement. Commit: `test: area metadata` → `feat: implement area operations`
+6. **Hydration.** RED: seed JSONL files in temp brain, test `hydrateDatabase` populates SQLite correctly (including tombstone handling). GREEN: implement. Commit: `test: hydration` → `feat: implement hydrateDatabase`
+7. **Staleness.** RED: test `isStale` returns true/false based on file mtime vs timestamp. Test `ensureFresh` skips when current, rebuilds when stale. GREEN: implement. Commit: `test: stale detection` → `feat: implement staleness checks`
+
+**Deliverables:**
+- `src/core/db.ts` — SQLite interface (implements `SearchEngine`)
+- `src/core/hydrate.ts` — JSONL → SQLite rebuild + staleness detection
+
+**Tests (all use in-memory SQLite or temp file):**
 - Create database → schema exists, WAL enabled
 - Upsert entry → query returns it
 - Upsert same ID twice → latest wins
 - Delete entry → query returns nothing
 - FTS5 search → returns matching entries ranked by relevance
 - FTS5 search for non-existent term → empty results
+- Query filters: by area, type, zone, tag, provenance (table-driven)
 - Hydrate from JSONL → all entries in SQLite
 - Hydrate with tombstones → deleted entries absent
 - isStale returns true after JSONL modification
@@ -231,6 +233,20 @@ Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
 ## Phase 4: Core Library Facade
 
 **Goal:** High-level API that wires store + db together with dual-write.
+
+**SOLID focus:** Dependency Inversion — the facade receives `store` and `db` as constructor parameters (injected, not created internally). Open/Closed — new knowledge types can be added without modifying existing add methods. Single Responsibility — `knowledge-store.ts` orchestrates dual-write, `render.ts` formats output, `init.ts` handles brain setup, `save.ts` handles git.
+
+**Pattern:** Facade — `knowledge-store.ts` exposes a simple API (`addFact`, `loadArea`, `search`) that hides the JSONL→SQLite dual-write complexity from callers. Null Object — missing brain returns empty results from read operations instead of throwing (when auto-init is possible).
+
+**Development process:**
+1. **Facade constructor.** Define `JsonlSqliteStore` class that takes store + db as constructor parameters. No implementation yet — just the wiring. Commit: `feat: facade constructor with DI`
+2. **Add operations.** RED: test `addFact` writes to both JSONL and SQLite. Verify entry exists in both after add. GREEN: implement dual-write. Repeat for `addDecision`, `addGotcha`, `addPattern`, `addLink`. Commit per type: `test: addFact dual-write` → `feat: implement addFact`
+3. **Auto-create area.** RED: test `addFact` to non-existent area creates it first. GREEN: implement area check + creation. Commit: `test: auto-create area in facade` → `feat: auto-create area on add`
+4. **Update/delete/verify/promote/archive.** RED: test each mutation. GREEN: implement. Each mutation appends to JSONL and updates SQLite. Commit per operation.
+5. **Read operations.** RED: test `loadArea`, `search`, `matchAreas`. GREEN: implement (delegate to db). Commit per operation.
+6. **Render.** RED: test `renderMarkdown` produces expected format (from design doc). Test `renderContextBlock` wraps in `<mykb-context>` tags. Test `renderAreaIndex` for Tier 1. GREEN: implement. Commit: `test: render markdown format` → `feat: implement renderers`
+7. **Init + dirty shutdown.** RED: test `initBrain` creates correct structure. Test `isDirtyShutdown` detects uncommitted files. Test `recoverDirtyShutdown` commits them. GREEN: implement. Commit per function.
+8. **Save.** RED: test `save` creates git commit. Test `saveAndPush`. GREEN: implement. Commit: `test: git save` → `feat: implement save`
 
 **Deliverables:**
 - `src/core/knowledge-store.ts` — implements `KnowledgeStore` interface:
@@ -297,6 +313,19 @@ Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
 
 **Goal:** Standalone `kb` command that exercises the full core library.
 
+**SOLID focus:** Single Responsibility — each command file does one thing (parse args, call facade, format output). Dependency Inversion — commands receive the facade via dependency injection, not by importing concrete classes.
+
+**Pattern:** Each command is a thin wrapper: parse args → call facade → render output. No business logic in CLI layer. If a command needs more than 5 lines of logic beyond arg parsing and facade calls, the logic belongs in the facade.
+
+**Development process:**
+1. **Entry point + help.** Set up commander with program name, version, description. Test `kb --help` outputs usage. Commit: `feat: CLI entry point`
+2. **One command at a time.** For each command: RED: write integration test that invokes the CLI binary via child_process, asserts stdout/stderr and file side effects. GREEN: implement command. Example for `kb init`:
+   - `test: kb init creates brain` → verify directory structure exists
+   - `feat: implement kb init`
+   - `test: kb init when brain exists` → verify error message
+3. **Priority order.** Build commands in dependency order: `init` → `add` → `load` → `list` → `search` → `save` → maintenance → area → stats → stale → compact → rebuild → export
+4. **Error messages.** RED: test each error case (missing brain, bad args, unknown area). GREEN: return clear error messages with exit code 1. Users (human and AI) read error output — it must be helpful.
+
 **Deliverables:**
 - `src/cli/cli.ts` — entry point, argument parsing
 - `src/cli/commands/init.ts` — `kb init`, `kb init area`
@@ -343,6 +372,18 @@ kb save
 
 **Goal:** Extension loads in Pi, handles session lifecycle, registers basic tools.
 
+**SOLID focus:** Dependency Inversion — hooks receive the facade and state via the extension's init function, not by importing globals. Single Responsibility — `session.ts` only handles lifecycle events, `state.ts` only tracks session state.
+
+**Pattern:** Observer — hooks subscribe to Pi events. Each hook is an independent observer that reacts to one event type. Factory — the extension entry point (`index.ts`) is a factory that creates the facade, state, and wires hooks.
+
+**Development process:**
+1. **Extension entry point.** Create `index.ts` that exports the default function. Inside: resolve brain path → create facade → create state → register hooks. Commit: `feat: extension entry point`
+2. **State.** RED: test state initializes with empty sets. GREEN: implement `SessionState` class. Commit: `test: session state` → `feat: implement state`
+3. **Session start.** RED: test that session_start handler calls initBrain when brain missing. Test dirty shutdown recovery. Test stale detection. Use mocks for the facade. GREEN: implement. Commit per behavior: `test: session_start auto-init` → `feat: auto-init on session_start`
+4. **Session shutdown.** RED: test shutdown calls save. GREEN: implement. Commit: `test: session_shutdown` → `feat: save on shutdown`
+5. **Create `mykb-dev` vfa profile.** Mount `dist/extension/` into Pi container. Verify extension loads (check stderr for startup log). Commit: `chore: add mykb-dev vfa profile`
+6. **LLM acceptance tests.** Run the session lifecycle tests via vfa. Verify no errors, git commits appear.
+
 **Deliverables:**
 - `src/extension/index.ts` — Pi extension entry point, registers all hooks + tools
 - `src/extension/state.ts` — session state (loaded areas, turn count, signal buffer)
@@ -380,6 +421,16 @@ vfa session close
 ## Phase 7: Pi Extension — Registered Tools
 
 **Goal:** AI can interact with the knowledge base via native Pi tools.
+
+**SOLID focus:** Single Responsibility — each tool file does one thing (one tool registration). Interface Segregation — tools depend only on the facade methods they need (`kb_add` needs `addFact`, `kb_search` needs `search`).
+
+**Pattern:** Each tool is a standalone module that registers one tool via `pi.registerTool()`. Tools call the facade directly (in-process), not the CLI binary. Tool descriptions and parameter schemas are critical — they're what the AI reads to decide which tool to use.
+
+**Development process:**
+1. **One tool at a time.** For each tool: RED: test the `execute` function with mock params, verify return format. GREEN: implement. Then LLM acceptance test via vfa.
+2. **Tool descriptions matter.** The `description`, `promptSnippet`, and `promptGuidelines` fields determine whether the AI picks the right tool. Write them clearly, test them with LLM acceptance tests. If the AI picks the wrong tool, the description needs rewriting — not the code.
+3. **Priority order.** `kb_add` → `kb_search` → `kb_load` → `kb_list` → `kb_verify`. Add is most important (AI needs to save knowledge), search is second (AI needs to find knowledge).
+4. **Return format.** All tools return compact markdown (same as `renderMarkdown`). The AI processes text, not JSON. Keep responses concise — token-efficient.
 
 **Deliverables:**
 - `src/tools/kb-add.ts` — `kb_add` tool (add any knowledge type)
@@ -424,6 +475,19 @@ vfa run --provider pi --profile mykb-dev \
 ## Phase 8: Pi Extension — Three-Tier Delivery
 
 **Goal:** Knowledge appears in context automatically. The core value proposition.
+
+**SOLID focus:** Open/Closed — new signal providers can be added without modifying the scorer. Interface Segregation — each hook depends only on the signals it collects and the scorer it feeds.
+
+**Pattern:** Strategy — signal providers (`FilePathSignal`, `CommandSignal`, `KeywordSignal`) are pluggable strategies implementing `SignalProvider` interface. The scorer aggregates across strategies without knowing their internals. Observer — each hook independently feeds signals to the scorer.
+
+**Development process:**
+1. **Tier 1 first.** RED: test that `before_agent_start` handler reads manifest and injects area index into system prompt. GREEN: implement. This is the simplest tier — no scoring, just read manifest and format. LLM acceptance test: AI can list areas it wasn't told about. Commit: `test: Tier 1 injection` → `feat: inject area index on session start`
+2. **Scorer.** RED: test `SignalProvider` interface with a mock provider. Test score aggregation with multiple providers. Test token budget truncation. Table-driven tests with fixture data. GREEN: implement scorer + budget enforcement. Commit: `test: scorer` → `feat: implement relevance scorer`
+3. **Signal providers.** One at a time. RED: test each provider produces correct scores from sample signals. GREEN: implement. Commit per provider: `test: file path signal` → `feat: implement FilePathSignal`
+4. **Tier 2.** RED: test that `context` event handler collects signals and injects matching facts. GREEN: implement by wiring scorer + signal providers + context injection. LLM acceptance test: AI answers from injected knowledge without being told to load. Commit: `test: Tier 2 context injection` → `feat: implement Tier 2`
+5. **Signal collection hooks.** Wire `tool-call.ts`, `tool-result.ts`, `input.ts` to feed signals to the scorer. Each is a simple observer that calls `state.addSignal()`. Commit per hook.
+6. **Tier 3.** RED: test `/kb` command loads full area. GREEN: implement via `registerCommand`. LLM acceptance test: `/kb networking` gives AI comprehensive knowledge. Commit: `test: /kb command` → `feat: implement Tier 3`
+7. **Negative test.** LLM acceptance test: irrelevant prompt ("What is 2+2?") does NOT trigger knowledge injection.
 
 **Deliverables:**
 - `src/extension/hooks/session.ts` (extend):
@@ -496,6 +560,13 @@ vfa run --provider pi --profile mykb-dev \
 ## Phase 9: Pi Extension — Tool Gating
 
 **Goal:** AI cannot directly edit knowledge files.
+
+**SOLID focus:** Open/Closed — gating rules can be extended (new file patterns) without modifying the hook handler logic.
+
+**Development process:**
+1. **Gating rules.** RED: test that write to `.jsonl` is blocked. Test that write to `area.json` is blocked. Test that write to unrelated file is allowed. Table-driven with file paths. GREEN: implement. Commit: `test: tool gating rules` → `feat: implement tool gating`
+2. **Block reason.** RED: test that blocked response includes reason text pointing to `kb_add`/`kb_update`. GREEN: implement. Commit: `test: block reason message` → `feat: block reason with tool redirect`
+3. **LLM acceptance test.** Verify AI reads the block reason and switches to the registered tool. This was already proven in spike 02 — verify it still works with the real implementation.
 
 **Deliverables:**
 - `src/extension/hooks/tool-call.ts` (extend):
