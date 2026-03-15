@@ -75,9 +75,30 @@ Two profiles for development:
 | Profile | Mounts | Use |
 |---------|--------|-----|
 | `mykb-spike` | `spikes/active-spike/` → Pi extensions | Spike experiments (already exists) |
-| `mykb-dev` | `dist/extension/` → Pi extensions | Real implementation testing (phases 6+) |
+| `mykb-dev` | `dist/extension/` → Pi extensions, `~/.mykb/` → brain data | Real implementation testing (phases 6+) |
 
-`mykb-dev` profile must be created before Phase 6 starts. It mounts the compiled extension output.
+`mykb-dev` profile must be created before Phase 6 starts. It mounts both the compiled extension AND the brain data volume (read-write):
+
+```yaml
+# ~/.vf-agents/profiles/mykb-dev.yaml
+id: mykb-dev
+description: "Profile for testing mykb Pi extension (real implementation)"
+compatible_runtimes: [pi]
+workspace:
+  type: ephemeral
+  mount_path: /workspace
+mode: headless
+output_format: json
+timeout: 60
+plugins:
+  pi:
+    - source: /home/jasonvi/GitHub/mykb/dist/extension
+      mount: /home/node/.pi/agent/extensions/mykb
+    - source: /home/jasonvi/.mykb
+      mount: /home/node/.mykb
+```
+
+Without the brain mount, the extension has no knowledge data to read or write.
 
 ## Error Classes
 
@@ -170,13 +191,13 @@ Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
 2. **Store — read.** RED: test that `readEntries` returns appended entry. Then test latest-wins with same ID. Then test tombstone exclusion. GREEN: implement each. Table-driven tests for the 3 cases. Commit: `test: readEntries cases` → `feat: implement readEntries`
 3. **Store — compact.** RED: test compact collapses versions and removes tombstones. Test idempotency. GREEN: implement. Commit: `test: compactEntries` → `feat: implement compactEntries`
 4. **Store — malformed lines.** RED: test that malformed JSON line is skipped (logged, not crashed). GREEN: implement. Commit: `test: malformed JSONL handling` → `feat: handle malformed lines`
-5. **Area — CRUD.** RED: test `createArea`, `readAreaMetadata`, `updateAreaMetadata`, `listAreas`, `areaExists`. GREEN: implement each. Commit: `test: area CRUD` → `feat: implement area management`
+5. **Area — CRUD.** RED: test `createArea`, `readAreaMetadata`, `updateAreaMetadata`, `listAreas`, `areaExists`, `deleteArea`. GREEN: implement each. `deleteArea` removes directory + all JSONL files + regenerates manifest. Commit: `test: area CRUD` → `feat: implement area management`
 6. **Manifest.** RED: test `regenerateManifest` produces correct JSON from area.json files. Test `readManifest`. GREEN: implement. Commit: `test: manifest generation` → `feat: implement manifest`
 7. **Auto-create.** RED: test that `appendEntry` to non-existent area creates the area directory first. GREEN: implement. Commit: `test: auto-create area on write` → `feat: auto-create area`
 
 **Deliverables:**
 - `src/core/store.ts` — JSONL operations (append, read, tombstone, compact)
-- `src/core/area.ts` — area management (create, read, update, list, exists)
+- `src/core/area.ts` — area management (create, read, update, list, exists, delete)
 - `src/core/manifest.ts` — manifest generation (regenerate, read)
 
 **Tests (all use `withTempBrain`):**
@@ -263,6 +284,7 @@ Phase 0 includes a GitHub Actions workflow (`.github/workflows/ci.yml`):
   - `loadArea(area, filter?)` → query SQLite with optional filter
   - `search(query)` → FTS5 search
   - `matchAreas(text)` → FTS5 across areas, group + rank by area
+  - `compact(area?)` → call store.compactEntries, rebuild SQLite FTS5 index
 - `src/core/render.ts` — output formatting:
   - `renderMarkdown(entries)` → compact markdown for LLM consumption
   - `renderJson(entries)` → JSON output
@@ -424,7 +446,7 @@ vfa session close
 
 **SOLID focus:** Single Responsibility — each tool file does one thing (one tool registration). Interface Segregation — tools depend only on the facade methods they need (`kb_add` needs `addFact`, `kb_search` needs `search`).
 
-**Pattern:** Each tool is a standalone module that registers one tool via `pi.registerTool()`. Tools call the facade directly (in-process), not the CLI binary. Tool descriptions and parameter schemas are critical — they're what the AI reads to decide which tool to use.
+**Pattern:** Each tool file exports a registration function that receives the Pi API and the facade as parameters: `registerKbAdd(pi: ExtensionAPI, store: KnowledgeStore)`. The extension entry point (Phase 6) calls these with the facade it created. Tools call the facade in-process — not the CLI binary. Tool descriptions and parameter schemas are critical — they're what the AI reads to decide which tool to use.
 
 **Development process:**
 1. **One tool at a time.** For each tool: RED: test the `execute` function with mock params, verify return format. GREEN: implement. Then LLM acceptance test via vfa.
@@ -482,12 +504,13 @@ vfa run --provider pi --profile mykb-dev \
 
 **Development process:**
 1. **Tier 1 first.** RED: test that `before_agent_start` handler reads manifest and injects area index into system prompt. GREEN: implement. This is the simplest tier — no scoring, just read manifest and format. LLM acceptance test: AI can list areas it wasn't told about. Commit: `test: Tier 1 injection` → `feat: inject area index on session start`
-2. **Scorer.** RED: test `SignalProvider` interface with a mock provider. Test score aggregation with multiple providers. Test token budget truncation. Table-driven tests with fixture data. GREEN: implement scorer + budget enforcement. Commit: `test: scorer` → `feat: implement relevance scorer`
-3. **Signal providers.** One at a time. RED: test each provider produces correct scores from sample signals. GREEN: implement. Commit per provider: `test: file path signal` → `feat: implement FilePathSignal`
-4. **Tier 2.** RED: test that `context` event handler collects signals and injects matching facts. GREEN: implement by wiring scorer + signal providers + context injection. LLM acceptance test: AI answers from injected knowledge without being told to load. Commit: `test: Tier 2 context injection` → `feat: implement Tier 2`
-5. **Signal collection hooks.** Wire `tool-call.ts`, `tool-result.ts`, `input.ts` to feed signals to the scorer. Each is a simple observer that calls `state.addSignal()`. Commit per hook.
-6. **Tier 3.** RED: test `/kb` command loads full area. GREEN: implement via `registerCommand`. LLM acceptance test: `/kb networking` gives AI comprehensive knowledge. Commit: `test: /kb command` → `feat: implement Tier 3`
-7. **Negative test.** LLM acceptance test: irrelevant prompt ("What is 2+2?") does NOT trigger knowledge injection.
+2. **Test fixtures.** Create `tests/fixtures/` with sample brain data: 3 areas (networking, ci-pipelines, secrets), 5+ facts each with varied tags and provenance. These fixtures are used by scorer tests and LLM acceptance tests throughout Phase 8.
+3. **Scorer.** RED: test `SignalProvider` interface with a mock provider. Test score aggregation with multiple providers. Test token budget truncation. Test empty signals → empty result (first-turn behavior). Table-driven tests with fixture data. GREEN: implement scorer + budget enforcement. Commit: `test: scorer` → `feat: implement relevance scorer`
+4. **Signal providers.** One at a time. RED: test each provider produces correct scores from sample signals. GREEN: implement. Commit per provider: `test: file path signal` → `feat: implement FilePathSignal`
+5. **Tier 2.** RED: test that `context` event handler collects signals and injects matching facts. Test first-turn (no signals) → no Tier 2 injection (Tier 1 index is sufficient). GREEN: implement by wiring scorer + signal providers + context injection. LLM acceptance test: AI answers from injected knowledge without being told to load. Commit: `test: Tier 2 context injection` → `feat: implement Tier 2`
+6. **Signal collection hooks.** Wire `tool-call.ts`, `tool-result.ts`, `input.ts` to feed signals to the scorer. Each is a simple observer that calls `state.addSignal()`. Commit per hook.
+7. **Tier 3.** RED: test `/kb` command loads full area. GREEN: implement via `registerCommand`. LLM acceptance test: `/kb networking` gives AI comprehensive knowledge. Commit: `test: /kb command` → `feat: implement Tier 3`
+8. **Negative test.** LLM acceptance test: irrelevant prompt ("What is 2+2?") does NOT trigger knowledge injection.
 
 **Deliverables:**
 - `src/extension/hooks/session.ts` (extend):
@@ -520,6 +543,8 @@ vfa run --provider pi --profile mykb-dev \
 - Tier 3: /kb command loads full area into context
 - Scorer: multiple signals combine correctly
 - Scorer: empty brain → no injection, no error
+- Scorer: no signals (first turn) → no Tier 2 injection, Tier 1 index is sufficient
+- Test fixtures: 3 areas, 5+ facts each with tags and provenance
 
 **LLM acceptance tests via vfa:**
 ```bash
@@ -579,11 +604,15 @@ vfa run --provider pi --profile mykb-dev \
 - Write to unrelated file → allowed
 - AI receives block reason (via vfa integration test)
 
-**Demo via vfa:**
-```
-vfa run --provider pi --profile mykb-spike \
+**LLM acceptance tests via vfa:**
+```bash
+vfa run --provider pi --profile mykb-dev \
   --prompt "Write hello to a file called test.jsonl"
 # Expected: blocked, AI explains restriction
+
+vfa run --provider pi --profile mykb-dev \
+  --prompt "Create a file called notes.txt with some content"
+# Expected: allowed — only .jsonl and brain metadata files are gated
 ```
 
 ---
