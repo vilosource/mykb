@@ -9,6 +9,7 @@ import {
   writeTombstone,
   compactEntries,
 } from '../../src/core/store.js';
+import { areaExists, readAreaMetadata } from '../../src/core/area.js';
 import {
   type KnowledgeEntry,
   type TombstoneEntry,
@@ -248,6 +249,27 @@ describe('malformed JSONL handling', () => {
       const entries = readEntries(brainPath, 'networking', 'fact');
       expect(entries).toHaveLength(2);
       expect(entries.map((e) => e.id).sort()).toEqual(['testid01', 'valid002']);
+    });
+  });
+});
+
+describe('auto-create area on appendEntry', () => {
+  it('should auto-create area directory with default area.json when area does not exist', async () => {
+    await withTempBrain(async (brainPath) => {
+      const entry = makeFactEntry({ area: 'new-area' });
+      appendEntry(brainPath, 'new-area', entry);
+
+      expect(areaExists(brainPath, 'new-area')).toBe(true);
+
+      const metadata = readAreaMetadata(brainPath, 'new-area');
+      expect(metadata).not.toBeNull();
+      expect(metadata!.id).toBe('new-area');
+      expect(metadata!.name).toBe('new-area');
+      expect(metadata!.summary).toBe('');
+
+      const entries = readEntries(brainPath, 'new-area', 'fact');
+      expect(entries).toHaveLength(1);
+      expect(entries[0].text).toBe('DNS uses CoreDNS');
     });
   });
 });
