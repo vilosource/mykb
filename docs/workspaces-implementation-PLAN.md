@@ -230,3 +230,82 @@ Full `kb work` command set. User can manage workspaces from the terminal.
 
 **WM3: Pi integration (Phase W3)**
 The AI knows your workspace context at session start, can update state and journal, and gets linked area knowledge automatically. This is the full workspace experience.
+
+## End-to-End User Journey Test
+
+After all 3 phases are merged and the bundle is rebuilt, run this full workflow to verify the real user experience across multiple sessions.
+
+### Setup
+
+```bash
+# Seed knowledge areas
+export MYKB_DIR=/tmp/mykb-e2e
+kb init
+kb add fact networking "DNS uses CoreDNS with zone forwarding" --source "docs"
+kb add gotcha networking "NAT has asymmetric routing" --source "debugging"
+kb add fact ci-pipelines "Runners use spot instances" --source "cloud-console"
+
+# Create and activate workspace
+kb work create myproject "My Project" --areas networking,ci-pipelines
+kb work start myproject
+kb work state --phase "building" --active "setting up CI"
+kb work journal "Previous session: configured DNS"
+kb save
+unset MYKB_DIR
+```
+
+### Session 1: Context loading + knowledge access + state mutation
+
+```bash
+vfa session start --provider pi --profile mykb-dev \
+  --prompt "What am I working on right now?"
+# Expected: AI knows "My Project", phase "building", active "setting up CI"
+
+vfa session send --prompt "What DNS setup do we use?"
+# Expected: answers "CoreDNS with zone forwarding" from linked networking area
+
+vfa session send --prompt "Are there any known issues with NAT?"
+# Expected: mentions asymmetric routing gotcha
+
+vfa session send --prompt "Update the phase to 'testing' and active to 'running integration tests'"
+# Expected: AI uses kb_work_state tool
+
+vfa session send --prompt "Add a journal entry: set up CI pipeline with spot runners"
+# Expected: AI uses kb_work_journal tool
+
+vfa session close
+# Expected: workspace auto-saved
+```
+
+### Session 2: Persistence across sessions
+
+```bash
+vfa session start --provider pi --profile mykb-dev \
+  --prompt "What phase am I in? What did I do last session?"
+# Expected: phase is "testing", journal shows both entries
+
+vfa session close
+```
+
+### What this verifies
+
+| Concern | Verified by |
+|---------|-------------|
+| Workspace context loads on session start | Session 1, first prompt |
+| Linked area knowledge available via Tier 2 boost | Session 1, DNS and NAT prompts |
+| AI can update workspace state via tools | Session 1, phase update prompt |
+| AI can append journal via tools | Session 1, journal prompt |
+| State persists across sessions | Session 2, phase check |
+| Journal accumulates across sessions | Session 2, journal check |
+| Session end auto-saves | Session 2 seeing Session 1's changes |
+
+### Results Template
+
+| Step | Expected | Actual | Pass/Fail |
+|------|----------|--------|-----------|
+| S1.1 What am I working on? | "My Project", phase "building" | | |
+| S1.2 DNS setup? | "CoreDNS with zone forwarding" | | |
+| S1.3 NAT issues? | "asymmetric routing" | | |
+| S1.4 Update phase | Uses kb_work_state | | |
+| S1.5 Add journal | Uses kb_work_journal | | |
+| S2.1 What phase? What last session? | "testing", both journal entries | | |
