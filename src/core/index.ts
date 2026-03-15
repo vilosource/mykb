@@ -24,3 +24,12 @@ export {
   type KnowledgeStore,
   type SearchEngine,
 } from './types.js';
+
+export {
+  BrainNotInitializedError,
+  AreaNotFoundError,
+  EntryNotFoundError,
+  EntryValidationError,
+  StoreCorruptionError,
+  DatabaseError,
+} from './errors.js';
