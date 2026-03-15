@@ -32,3 +32,12 @@ export interface CommandHandler {
   description: string;
   execute: (args: string, ctx: unknown) => Promise<void>;
 }
+
+export interface BeforeAgentStartResult {
+  systemPrompt?: string;
+  message?: {
+    customType: string;
+    content: string;
+    display?: boolean;
+  };
+}

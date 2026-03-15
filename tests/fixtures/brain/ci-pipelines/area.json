@@ -1,0 +1,9 @@
+{
+  "id": "ci-pipelines",
+  "name": "CI Pipelines",
+  "summary": "CI/CD pipelines, GitHub Actions, GitLab CI, build automation and deployment",
+  "owner": "devops",
+  "tags": ["ci", "cd", "github-actions", "gitlab-ci", "deployment"],
+  "created": "2026-01-01T00:00:00.000Z",
+  "updated": "2026-03-12T00:00:00.000Z"
+}
