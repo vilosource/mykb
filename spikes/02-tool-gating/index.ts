@@ -71,10 +71,10 @@ export default function (pi: ExtensionAPI) {
   // Block writes to .jsonl files
   pi.on("tool_call", async (event) => {
     // Check if this is a write/edit to a .jsonl file
-    const isWriteTool = event.tool === "write" || event.tool === "edit";
+    const isWriteTool = event.toolName === "write" || event.toolName === "edit";
     if (!isWriteTool) return;
 
-    const filePath = event.input?.file_path || event.input?.path || "";
+    const filePath = event.input?.file_path || event.input?.path || event.input?.filePath || "";
     if (typeof filePath === "string" && filePath.endsWith(".jsonl")) {
       return {
         block: true,
