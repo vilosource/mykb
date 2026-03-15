@@ -32,6 +32,33 @@ Same gates as core mykb — enforced between every phase:
 - [ ] Active workspace accessed only via `getActiveWorkspaceId()` / `setActiveWorkspaceId()` / `clearActiveWorkspaceId()`
 - [ ] Journal accessed only via `appendJournal()` / `readJournal()` on the interface
 
+## Agent Workflow
+
+Each phase is delegated to a subagent. The main agent (me) manages the flow.
+
+**Process per phase:**
+1. Launch subagent with phase requirements on a feature branch (`phase-w1-*`, `phase-w2-*`, `phase-w3-*`)
+2. Wait for completion notification
+3. Checkout branch, run `npm test`, review code
+4. Run phase gate checklist (code + TDD + guardrails)
+5. If gate passes: merge to develop, delete branch, launch next phase
+6. If gate fails: fix issues or re-run agent
+
+**Sequential only.** No parallel phases — previous mykb build showed parallel agents fighting over the same working directory, causing stray commits and merge conflicts.
+
+**Agent prompt must include:**
+- `cd /home/jasonvi/GitHub/mykb` at the START of every bash command (shell resets CWD between calls)
+- Git user: `vilosource` / `vilosource@users.noreply.github.com` (verify and fix)
+- `--registry https://registry.npmjs.org --userconfig /dev/null` for any npm operations
+- List of files to read before coding (existing source the agent depends on)
+- No AI attribution in commits
+- Branch workflow: checkout develop → pull → create feature branch → work → push (do NOT merge)
+
+**After Phase W3:**
+1. Rebuild esbuild bundle: `npx esbuild src/extension/index.ts --bundle --platform=node --format=esm --outfile=dist/bundle/index.js --external:better-sqlite3 --target=esnext --legal-comments=none`
+2. Rebuild container deps: `docker run --rm -v dist/bundle:/ext -w /ext ghcr.io/vilosource/vf-agents-pi:latest npm install --registry https://registry.npmjs.org`
+3. Run LLM acceptance tests via vfa (Phase W3 tests + end-to-end user journey)
+
 ## Test Isolation
 
 All tests use `withTempBrain`. Workspace files live inside the brain directory at `workspaces/`.
