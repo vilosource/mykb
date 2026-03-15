@@ -39,20 +39,17 @@ export { resolveBrainPath, brainExists } from './config.js';
 export { generateId } from './id.js';
 
 export {
-  appendEntry,
-  readEntries,
-  readAllEntries,
-  writeTombstone,
-  compactEntries,
-} from './store.js';
-
-export {
-  createArea,
-  readAreaMetadata,
-  updateAreaMetadata,
+  createDatabase,
+  upsertEntry,
+  deleteEntry,
+  queryEntries,
+  searchEntries,
+  upsertArea,
   listAreas,
-  areaExists,
-  deleteArea,
-} from './area.js';
+  getAreaStats,
+  getLastHydrated,
+  setLastHydrated,
+  type AreaStats,
+} from './db.js';
 
-export { regenerateManifest, readManifest } from './manifest.js';
+export { hydrateDatabase, isStale, ensureFresh } from './hydrate.js';
