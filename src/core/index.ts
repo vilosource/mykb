@@ -35,3 +35,5 @@ export {
 } from './errors.js';
 
 export { resolveBrainPath, brainExists } from './config.js';
+
+export { generateId } from './id.js';
