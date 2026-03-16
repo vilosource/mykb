@@ -295,3 +295,104 @@ describe('FileSystemWorkspaceStorage Journal', () => {
     });
   });
 });
+
+describe('FileSystemWorkspaceStorage Document Index', () => {
+  it('scanDocumentIndex with no docs returns empty array', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const docs = storage.scanDocumentIndex('my-proj');
+      expect(docs).toEqual([]);
+    });
+  });
+
+  it('scanDocumentIndex finds .md files in workspace directory', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
+      fs.writeFileSync(path.join(wsDir, 'notes.md'), '# Notes\nSome content\n');
+
+      const docs = storage.scanDocumentIndex('my-proj');
+      expect(docs).toHaveLength(1);
+      expect(docs[0].path).toBe('notes.md');
+      expect(docs[0].description).toBeNull();
+    });
+  });
+
+  it('scanDocumentIndex with doc missing frontmatter returns description null', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
+      fs.writeFileSync(path.join(wsDir, 'plain.md'), 'Just plain text\n');
+
+      const docs = storage.scanDocumentIndex('my-proj');
+      const doc = docs.find((d) => d.path === 'plain.md');
+      expect(doc).toBeDefined();
+      expect(doc!.description).toBeNull();
+    });
+  });
+
+  it('scanDocumentIndex with doc having frontmatter extracts description', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
+      fs.writeFileSync(
+        path.join(wsDir, 'spec.md'),
+        '---\ndescription: Server inventory and IPs\n---\n# Spec\nContent here\n'
+      );
+
+      const docs = storage.scanDocumentIndex('my-proj');
+      const doc = docs.find((d) => d.path === 'spec.md');
+      expect(doc).toBeDefined();
+      expect(doc!.description).toBe('Server inventory and IPs');
+    });
+  });
+
+  it('scanDocumentIndex finds docs in subdirectories', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
+      const docsDir = path.join(wsDir, 'docs');
+      fs.mkdirSync(docsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(docsDir, 'deep.md'),
+        '---\ndescription: Deep doc\n---\n# Deep\n'
+      );
+
+      const docs = storage.scanDocumentIndex('my-proj');
+      const doc = docs.find((d) => d.path === 'docs/deep.md');
+      expect(doc).toBeDefined();
+      expect(doc!.description).toBe('Deep doc');
+    });
+  });
+
+  it('updateDocumentIndex writes scanned docs to workspace.json', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
+      fs.writeFileSync(
+        path.join(wsDir, 'readme.md'),
+        '---\ndescription: Project readme\n---\n# README\n'
+      );
+
+      storage.updateDocumentIndex('my-proj');
+
+      const ws = storage.readWorkspace('my-proj');
+      expect(ws).not.toBeNull();
+      expect(ws!.documents).toHaveLength(1);
+      expect(ws!.documents[0].path).toBe('readme.md');
+      expect(ws!.documents[0].description).toBe('Project readme');
+    });
+  });
+});
