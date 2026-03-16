@@ -2,30 +2,94 @@
 
 ## Problem
 
-mykb's knowledge delivery works well inside Pi — the extension auto-injects relevant facts, gates tool use, and manages session lifecycle through Pi's in-process event model. But when running inside a vfa container with Claude Code (or Gemini), the Pi extension is not available. Each runtime has a different hook mechanism with different capabilities:
+mykb's knowledge delivery works well inside Pi — the extension auto-injects relevant facts, gates tool use, and manages session lifecycle through Pi's in-process event model. But when running inside a vfa container with Claude Code or Gemini CLI, the Pi extension is not available.
 
-- Pi has rich in-process hooks with shared state, signal accumulation, and direct context injection
-- Claude Code has shell-command hooks with nudge-based delivery but also unique capabilities (LLM-evaluated hooks, compaction recovery, stop control)
-- Gemini has minimal hooks (session end, pre-compress only)
+Each runtime has a different hook mechanism with different strengths:
 
-Building separate hook implementations per runtime would duplicate logic and diverge over time. But flattening everything to the lowest common denominator would sacrifice Pi's automatic injection and Claude Code's behavioral enforcement.
+- **Pi** has in-process hooks with shared state, signal accumulation, and direct context injection — the richest automatic knowledge delivery
+- **Claude Code** has shell-command hooks with LLM-evaluated hooks, compaction recovery, and stop control — the strongest behavioral enforcement
+- **Gemini CLI** has shell-command hooks with LLM request/response interception, tool selection control, and response retry — the deepest model-level integration
+
+Building separate implementations per runtime would duplicate logic and diverge over time. Flattening everything to the lowest common denominator would sacrifice each runtime's unique strengths.
 
 We need a **unified hook system** that:
-1. Shares logic across runtimes — one place to add a nudge or check
-2. Preserves each runtime's strengths — Pi's injection, Claude Code's enforcement
-3. Adapts delivery mode to the runtime — inject when possible, nudge when not
+1. Shares logic across runtimes — one place to add a hook or check
+2. Preserves each runtime's strengths — no runtime is diminished
+3. Adapts delivery mode to the runtime — inject, nudge, or intercept depending on what's available
 
 ## Design Principles
 
-1. **Single interface, runtime-aware behavior.** `kb hook <event>` is the entry point for all hook logic. The runtime determines the delivery mode (inject vs nudge), not the hook logic itself.
+1. **Single interface, runtime-aware behavior.** `kb hook <event>` is the entry point for all hook logic. The runtime determines the delivery mode, not the hook logic itself.
 
-2. **Common foundation shared across all runtimes.** Area matching, tool gating, workspace loading, save triggers — these work the same everywhere. The logic lives in `src/hooks/` and is called by both Pi (in-process) and Claude Code (compiled binary).
+2. **Common foundation shared across all runtimes.** Area matching, tool gating, workspace loading, save triggers — these work the same everywhere. The logic lives in `src/hooks/` and is called by all runtimes.
 
-3. **Runtime-specific capabilities preserved.** Pi's per-turn signal scoring is not diminished to match Claude Code's per-prompt matching. Claude Code's LLM hooks are not ignored because Pi can't do them. Each runtime uses its full capabilities.
+3. **Runtime-specific capabilities preserved.** Pi's per-turn signal scoring is not diminished to match Claude Code's per-prompt matching. Gemini's BeforeModel injection is not ignored because Pi can't do it. Each runtime uses its full capabilities.
 
-4. **Hooks are nudges in Claude Code, enforcement in Pi.** In Claude Code, hooks suggest via `systemMessage` and the AI decides. In Pi, hooks inject directly and gate tools. The same `kb hook` call returns different output depending on the runtime.
+4. **Delivery mode adapts to the runtime:**
+   - **Pi** — in-process injection and enforcement (strongest delivery)
+   - **Claude Code** — nudges via `systemMessage`, enforcement via stop/prompt hooks
+   - **Gemini CLI** — nudges via `systemMessage`, injection via `BeforeModel` message manipulation, enforcement via `AfterAgent` retry
 
-5. **CLI-powered logic is adapter-agnostic.** The `kb match`, `kb check-*` commands work from any shell. The hook scripts are thin callers of these commands.
+5. **CLI-powered logic is adapter-agnostic.** The `kb match`, `kb check-*` commands work from any shell. Hook scripts are thin callers.
+
+## Runtime Hook Systems
+
+### Pi Extension API
+
+7 events, in-process TypeScript, shared state across events.
+
+| Event | When it fires | Can inject? | Can block? |
+|-------|--------------|------------|-----------|
+| `session_start` | Session begins | No (init only) | No |
+| `before_agent_start` | Before first turn | Yes — mutate system prompt | No |
+| `context` | Every turn, with message history | Yes — prepend system message | No |
+| `tool_call` | Before tool execution | No | Yes — return `{block, reason}` |
+| `tool_result` | After tool execution | No (signal collection) | No |
+| `input` | User text submitted | No (signal collection) | No |
+| `session_shutdown` | Session ends | No | No |
+
+Additional: `registerTool()` for native tools, `registerCommand()` for `/kb` command.
+
+### Claude Code Hook System
+
+18+ events, shell commands or LLM-evaluated, JSON stdin/stdout.
+
+| Event | When it fires | Can inject? | Can block? |
+|-------|--------------|------------|-----------|
+| `SessionStart` | Session begins/resumes/compaction | Yes — `additionalContext` or stdout | No |
+| `UserPromptSubmit` | User submits prompt | Yes — `additionalContext` | Yes — `decision: "block"` |
+| `PreToolUse` | Before tool execution | Yes — `additionalContext` | Yes — `permissionDecision: "deny"` |
+| `PostToolUse` | After tool succeeds | Yes — `additionalContext` | No |
+| `PostToolUseFailure` | After tool fails | Yes — `additionalContext` | No |
+| `Stop` | Agent finishes responding | Yes — force continuation | Yes — `decision: "block"` |
+| `PreCompact` | Before compaction | Yes | No |
+| `PostCompact` | After compaction | Yes | No |
+| `SessionEnd` | Session terminates | No (cleanup) | No |
+| `PermissionRequest` | Permission dialog shown | No | Yes — allow/deny |
+| `SubagentStart/Stop` | Subagent lifecycle | Yes — `additionalContext` | No |
+| `ConfigChange` | Config file modified | No | Yes — `decision: "block"` |
+
+Hook types: `command` (shell), `prompt` (single LLM call), `agent` (multi-turn LLM with tools), `http` (webhook).
+
+### Gemini CLI Hook System
+
+11 events, shell commands, JSON stdin/stdout.
+
+| Event | When it fires | Can inject? | Can block? |
+|-------|--------------|------------|-----------|
+| `SessionStart` | Session begins/resumes/clear | Yes — `additionalContext` | No |
+| `SessionEnd` | Session terminates | No (cleanup) | No |
+| `BeforeAgent` | User submits prompt, before planning | Yes — `additionalContext` | Yes — `decision: "deny"` |
+| `AfterAgent` | Agent finishes responding | No | Yes — `decision: "deny"` forces retry with `reason` as correction |
+| `BeforeTool` | Before tool execution | Yes — modify `tool_input` | Yes — `decision: "deny"` |
+| `AfterTool` | After tool execution | Yes — `additionalContext`, tail calls | Yes — replace result |
+| `BeforeModel` | Before LLM API call | Yes — modify messages, model, config | Yes — synthetic response (skip LLM) |
+| `AfterModel` | After LLM response chunk | Yes — modify response | Yes — block chunk |
+| `BeforeToolSelection` | Before LLM decides tools | No | Yes — filter tools, force mode |
+| `Notification` | System alert | No (observability) | No |
+| `PreCompress` | Before compression | No (advisory) | No |
+
+Hook types: `command` (shell) only currently. Extensions can include `hooks/hooks.json`.
 
 ## Solution
 
@@ -37,11 +101,13 @@ src/hooks/                         ← Shared hook logic (TypeScript)
   user-prompt.ts                   ← Match prompt against areas
   pre-tool-use.ts                  ← Gate brain file writes
   post-tool-use.ts                 ← Impact check, capture nudges
-  stop.ts                          ← Journal reminder
+  stop.ts                          ← Journal reminder check
   session-end.ts                   ← Auto-save
   context.ts                       ← Signal scoring + entry selection (Pi-enhanced)
+  scorer.ts                        ← Area scoring (shared by context + matching)
+  signals.ts                       ← Signal collection (Pi-enhanced)
 
-src/cli/hook.ts                    ← CLI: `kb hook <event> [--format claude|pi]`
+src/cli/hook.ts                    ← CLI: `kb hook <event> [--format claude|gemini|pi]`
 src/extension/index.ts             ← Pi: calls src/hooks/* in-process
 
 Build:
@@ -51,114 +117,123 @@ Build:
 ### How each runtime uses it
 
 **Pi extension (in-process, full capability):**
-- Calls `src/hooks/*` functions directly — no process spawn, no serialization
-- Has shared `SessionState` for signal accumulation across turns
-- `context` event calls `context.ts` with accumulated signals → returns entries for injection
-- `tool_call` event calls `pre-tool-use.ts` → returns block/allow
-- `before_agent_start` calls `session-start.ts` → mutates system prompt directly
+- Calls `src/hooks/*` functions directly — no process spawn
+- Shared `SessionState` for signal accumulation across turns
+- `context` event calls `context.ts` → returns entries for injection
+- `before_agent_start` calls `session-start.ts` → mutates system prompt
+- Registers native tools via Pi API
 
-**Claude Code (compiled binary, nudge-based):**
+**Claude Code (compiled binary, nudge + enforcement):**
 - `hooks.json` wires events to `kb-hook <event> --format claude`
-- Binary reads event JSON from stdin, runs shared hook logic, outputs `systemMessage` JSON
-- Compiled via `bun build --compile` for fast startup (~50ms vs ~85ms Node.js)
-- Hooks suggest actions; the AI decides whether to follow
+- Binary reads event JSON from stdin, runs shared logic, outputs formatted JSON
+- Nudges via `systemMessage`, enforcement via `Stop` prompt hooks
+- Compaction recovery via `SessionStart(compact)` re-injection
 
-**Gemini (minimal, shell-based):**
-- Session end hook calls `kb-hook session-end --format gemini`
-- Limited hook surface — only lifecycle events available
+**Gemini CLI (compiled binary, nudge + interception):**
+- `hooks.json` wires events to `kb-hook <event> --format gemini`
+- Same binary, different output format
+- Nudges via `systemMessage`, injection via `BeforeModel` message array
+- Enforcement via `AfterAgent` retry and `BeforeToolSelection` filtering
 
 ## Capability Tables
 
 ### Common Foundation (all runtimes)
 
-These hooks use the same logic everywhere. The delivery mechanism differs but the behavior is equivalent.
-
-| Hook | What it does | Trigger |
-|------|-------------|---------|
-| Session start context | Load active workspace state + area index, inject into AI context | Session begins |
-| Tool gating | Block direct writes to brain `.jsonl`/`area.json`/`manifest.json`, redirect to `kb add` | Before Edit/Write tool |
-| Area matching (prompt) | Match user's prompt against area summaries, suggest loading relevant areas | User submits prompt |
-| Area matching (command) | Match bash command against area summaries, suggest relevant knowledge | Before Bash tool |
-| Session dedup | Track suggested areas per session to avoid nagging | Across all matching hooks |
-| Auto-save | Commit brain changes to git | Session ends |
-| Error→fix capture | Detect fail→success bash exit code transition, suggest adding gotcha | After Bash tool |
-| Save reminder | Periodic reminder to journal progress (every N commands) | After Bash tool |
+| Hook | What it does | Pi event | Claude Code event | Gemini event |
+|------|-------------|----------|------------------|-------------|
+| Session start context | Load workspace state + area index, inject into context | `before_agent_start` | `SessionStart` | `SessionStart` |
+| Tool gating | Block direct writes to brain files, redirect to `kb add` | `tool_call` | `PreToolUse(Edit\|Write)` | `BeforeTool(file_edit\|write_file)` |
+| Area matching (prompt) | Match user prompt against areas, suggest loading | `input` (signal) | `UserPromptSubmit` | `BeforeAgent` |
+| Area matching (command) | Match shell command against areas | `tool_call` (signal) | `PreToolUse(Bash)` | `BeforeTool(run_shell_command)` |
+| Session dedup | Track suggested areas per session | In-process state | Temp files | Temp files |
+| Auto-save | Commit brain to git | `session_shutdown` | `SessionEnd` | `SessionEnd` |
+| Error→fix capture | Detect fail→success transition, suggest gotcha | `tool_result` | `PostToolUse(Bash)` | `AfterTool(run_shell_command)` |
+| Save reminder | Periodic reminder to journal | Counter in state | Counter in temp file | Counter in temp file |
 
 ### Pi-Only Capabilities
 
-These leverage Pi's in-process extension model. Cannot be replicated in Claude Code's shell-command hooks.
-
 | Capability | What it does | Why Pi-only |
 |-----------|-------------|-------------|
-| Per-turn automatic context injection | Scores accumulated signals against areas every turn, selects entries within 2000-token budget, injects as system message | Requires `context` event (per-turn with message history) and in-process signal state |
-| Signal accumulation across turns | Collects file path signals from tool_call, keyword signals from tool_result + input, aggregates across turns for scoring | Requires shared in-process `SessionState` across events |
-| Workspace-aware scoring boost | Areas linked to active workspace get +0.5 score boost during context scoring | Part of the in-process scoring pipeline |
-| Native tool registration | `kb_add`, `kb_search`, `kb_load`, `kb_list`, `kb_work_*` as first-class Pi tools with structured input/output | Pi extension API `registerTool()` |
-| Direct system prompt mutation | Appends area index + workspace state directly to system prompt at session start | Pi's `before_agent_start` returns modified `systemPrompt` |
-| `/kb` command | On-demand area loading via registered command with `ctx.inject()` for direct context injection | Pi extension API `registerCommand()` |
-| Signal providers | Pluggable scoring providers (KeywordSignalProvider, FilePathSignalProvider) with extensible interface | In-process scoring architecture |
+| Per-turn context injection | Scores accumulated signals, selects entries within token budget, injects as system message every turn | Requires `context` event with message history and in-process signal state |
+| Signal accumulation | Collects file path + keyword signals across turns, aggregates for scoring | Requires shared in-process `SessionState` |
+| Workspace-aware scoring boost | +0.5 boost to areas linked to active workspace | Part of in-process scoring pipeline |
+| Native tool registration | `kb_add`, `kb_search`, `kb_load`, `kb_list`, `kb_work_*` as first-class tools | Pi `registerTool()` API |
+| Direct system prompt mutation | Appends to system prompt at session start | `before_agent_start` returns modified prompt |
+| `/kb` command | On-demand area loading with `ctx.inject()` | Pi `registerCommand()` API |
+| Pluggable signal providers | Extensible `SignalProvider` interface for custom scoring | In-process architecture |
 
 ### Claude Code-Only Capabilities
 
-These leverage Claude Code's hook system features that Pi doesn't have.
-
 | Capability | What it does | Why Claude Code-only |
 |-----------|-------------|---------------------|
-| Compaction re-injection | Re-inject workspace state + area index after context compaction | `SessionStart` fires with `compact` matcher — Pi has no compaction event |
-| Stop hook continuation | Force Claude to continue working if journal wasn't written | `Stop` event with `decision: "block"` — Pi can't intercept agent stopping |
-| LLM-evaluated hooks | Use a second model (Haiku) to evaluate conditions that need judgment | `type: "prompt"` and `type: "agent"` hook types — Pi has no equivalent |
-| PreCompact checkpoint | Journal progress + save before compaction to prevent context loss | `PreCompact` event — Pi has no equivalent |
-| Post-failure context | Inject additional context after a tool call fails | `PostToolUseFailure` event — Pi has no equivalent |
-| Richer event surface | 18+ hook events covering subagents, config changes, worktrees, permissions, elicitation | Claude Code's extensive hook system vs Pi's 7 events |
-| Agent-based verification | Spawn a subagent with tool access to verify conditions (e.g., run tests before stopping) | `type: "agent"` hooks — multi-turn verification |
+| Compaction re-injection | Re-inject context after compaction | `SessionStart` fires on `compact` — no other runtime has this |
+| Stop continuation | Force agent to keep working if journal not written | `Stop` with `decision: "block"` — Pi/Gemini can't intercept stopping |
+| LLM-evaluated hooks | Use Haiku to evaluate conditions needing judgment | `type: "prompt"` hooks — Gemini/Pi have no equivalent |
+| Agent-based verification | Spawn subagent with tool access to verify conditions | `type: "agent"` hooks — multi-turn verification |
+| PreCompact checkpoint | Journal + save before compaction | `PreCompact` event |
+| Post-failure context | Inject context after tool failure | `PostToolUseFailure` event |
+| Subagent context | Inject context when subagents spawn | `SubagentStart` event |
+
+### Gemini-Only Capabilities
+
+| Capability | What it does | Why Gemini-only |
+|-----------|-------------|----------------|
+| BeforeModel message injection | Modify the LLM request messages array before sending — can inject knowledge directly into what the model sees | `BeforeModel` event — neither Pi nor Claude Code can intercept the LLM request |
+| Tool selection control | Filter available tools or force tool mode (ANY/NONE) | `BeforeToolSelection` — could force `kb add` when in capture mode |
+| AfterAgent retry | Reject agent response and force retry with correction prompt | `AfterAgent` with `decision: "deny"` + `reason` — Claude Code's `Stop` can continue but can't correct |
+| Synthetic response | Skip the LLM call entirely, return a cached/precomputed response | `BeforeModel` with `llm_response` — could serve cached knowledge |
+| Response chunk modification | Intercept and modify LLM response in real-time during streaming | `AfterModel` — real-time PII filtering or response transformation |
+| Tool result replacement | Replace a tool's result before the agent sees it | `AfterTool` with `decision: "deny"` — could enrich tool results with knowledge |
+| Tail tool calls | Chain another tool call immediately after one completes | `AfterTool` with `tailToolCallRequest` — auto-chain `kb match` after file reads |
 
 ## Hook Catalog
 
 ### Priority 1: Foundation
 
-| # | Hook | Event | Capability tier | Runtime behavior |
-|---|------|-------|----------------|-----------------|
-| H1 | Session start context | SessionStart / before_agent_start | Common | Pi: mutate system prompt. Claude: `systemMessage` |
-| H2 | Tool gating | PreToolUse / tool_call | Common | Both: block with reason |
-| H3 | Auto-save | SessionEnd / session_shutdown | Common | Both: `kb save` |
+| # | Hook | Common | Pi | Claude Code | Gemini |
+|---|------|--------|-----|------------|--------|
+| H1 | Session start context | Shared logic | `before_agent_start` → mutate prompt | `SessionStart` → `systemMessage` | `SessionStart` → `additionalContext` |
+| H2 | Tool gating | Shared logic | `tool_call` → block | `PreToolUse` → deny | `BeforeTool` → deny |
+| H3 | Auto-save | Shared logic | `session_shutdown` | `SessionEnd` | `SessionEnd` |
 
 ### Priority 2: Area Matching
 
-| # | Hook | Event | Capability tier | Runtime behavior |
-|---|------|-------|----------------|-----------------|
-| H4 | Prompt matching | UserPromptSubmit / input | Common | Pi: add to signals. Claude: nudge with area suggestions |
-| H5 | Command matching | PreToolUse(Bash) / tool_call | Common | Pi: add to signals. Claude: nudge with area suggestions |
-| H6 | Context injection | context | **Pi-only** | Pi: score signals → select entries → inject. Claude: N/A |
+| # | Hook | Common | Pi | Claude Code | Gemini |
+|---|------|--------|-----|------------|--------|
+| H4 | Prompt matching | Shared scorer | `input` → signal | `UserPromptSubmit` → nudge | `BeforeAgent` → nudge or `BeforeModel` → inject into messages |
+| H5 | Command matching | Shared scorer | `tool_call` → signal | `PreToolUse(Bash)` → nudge | `BeforeTool(run_shell_command)` → nudge |
+| H6 | Context injection | Shared scorer | `context` → inject entries | N/A | `BeforeModel` → inject into message array |
 
 ### Priority 3: Capture Nudges
 
-| # | Hook | Event | Capability tier | Runtime behavior |
-|---|------|-------|----------------|-----------------|
-| H7 | Error→fix gotcha | PostToolUse(Bash) / tool_result | Common | Both: nudge to add gotcha |
-| H8 | Save reminder | PostToolUse(Bash) | Common | Both: periodic nudge |
-| H9 | Impact check on edit | PostToolUse(Edit\|Write) | Common | Both: nudge if edited file impacts known facts |
-| H10 | Stale citation check | PostToolUse(Read) | Common | Both: nudge if read file has stale citations |
+| # | Hook | Common | Pi | Claude Code | Gemini |
+|---|------|--------|-----|------------|--------|
+| H7 | Error→fix gotcha | Shared logic | `tool_result` → nudge | `PostToolUse(Bash)` → nudge | `AfterTool(run_shell_command)` → nudge |
+| H8 | Save reminder | Shared logic | Counter in state | Counter in temp file | Counter in temp file |
+| H9 | Impact on edit | Shared logic | `tool_result` → nudge | `PostToolUse(Edit\|Write)` → nudge | `AfterTool(file_edit)` → nudge |
+| H10 | Stale citation | Shared logic | `tool_result` → nudge | `PostToolUse(Read)` → nudge | `AfterTool(read_file)` → nudge |
 
 ### Priority 4: Behavioral Enforcement
 
-| # | Hook | Event | Capability tier | Runtime behavior |
-|---|------|-------|----------------|-----------------|
-| H11 | Journal reminder | Stop | **Claude Code-only** | Force continuation if significant work done without journaling |
-| H12 | Compaction checkpoint | PreCompact | **Claude Code-only** | Journal + save before context compaction |
-| H13 | Compaction recovery | SessionStart(compact) | **Claude Code-only** | Re-inject workspace state after compaction |
+| # | Hook | Pi | Claude Code | Gemini |
+|---|------|-----|------------|--------|
+| H11 | Journal reminder | N/A | `Stop` → prompt hook forces continuation | `AfterAgent` → deny + "please journal" correction |
+| H12 | Compaction checkpoint | N/A | `PreCompact` → journal + save | `PreCompress` → journal + save |
+| H13 | Compaction recovery | N/A | `SessionStart(compact)` → re-inject context | `SessionStart(compress)` → re-inject context |
+| H14 | Response quality check | N/A | N/A | `AfterAgent` → deny if response didn't use available knowledge |
+| H15 | Knowledge-aware model request | N/A | N/A | `BeforeModel` → inject relevant entries into message array |
 
 ### Priority 5: Provenance (future)
 
-| # | Hook | Event | Capability tier | Runtime behavior |
-|---|------|-------|----------------|-----------------|
-| H14 | Conflict detection | PostToolUse(Bash) after kb add | Common | Both: warn if new fact conflicts with existing |
-| H15 | Structured output extraction | PostToolUse(Bash) | Common | Both: detect JSON/YAML/HCL, suggest extraction |
+| # | Hook | Common | All runtimes |
+|---|------|--------|-------------|
+| H16 | Conflict detection | Shared logic | Nudge after `kb add` if conflicting entry exists |
+| H17 | Structured output extraction | Shared logic | Detect JSON/YAML/HCL in tool output, suggest extraction |
+| H18 | Tool selection enforcement | N/A | Gemini-only: `BeforeToolSelection` to force `kb add` tool in capture mode |
 
 ## Per-Runtime Delivery
 
 ### Claude Code
-
-`hooks.json` wired into the vfa profile:
 
 ```json
 {
@@ -198,108 +273,147 @@ These leverage Claude Code's hook system features that Pi doesn't have.
 }
 ```
 
+### Gemini CLI
+
+```json
+{
+  "SessionStart": [
+    {"matcher": "startup|resume|compress",
+     "hooks": [{"type": "command", "command": "kb-hook session-start --format gemini"}]}
+  ],
+  "BeforeAgent": [
+    {"hooks": [{"type": "command", "command": "kb-hook user-prompt --format gemini"}]}
+  ],
+  "BeforeTool": [
+    {"matcher": "file_edit|write_file",
+     "hooks": [{"type": "command", "command": "kb-hook pre-tool-use --format gemini"}]},
+    {"matcher": "run_shell_command",
+     "hooks": [{"type": "command", "command": "kb-hook pre-bash --format gemini"}]}
+  ],
+  "AfterTool": [
+    {"matcher": "run_shell_command",
+     "hooks": [{"type": "command", "command": "kb-hook post-bash --format gemini"}]},
+    {"matcher": "file_edit|write_file",
+     "hooks": [{"type": "command", "command": "kb-hook post-edit --format gemini"}]},
+    {"matcher": "read_file",
+     "hooks": [{"type": "command", "command": "kb-hook post-read --format gemini"}]}
+  ],
+  "AfterAgent": [
+    {"hooks": [{"type": "command", "command": "kb-hook after-agent --format gemini"}]}
+  ],
+  "BeforeModel": [
+    {"hooks": [{"type": "command", "command": "kb-hook before-model --format gemini"}]}
+  ],
+  "PreCompress": [
+    {"hooks": [{"type": "command", "command": "kb-hook pre-compact --format gemini"}]}
+  ],
+  "SessionEnd": [
+    {"matcher": "",
+     "hooks": [{"type": "command", "command": "kb-hook session-end --format gemini"}]}
+  ]
+}
+```
+
 ### Pi Extension
 
-The Pi extension (`src/extension/index.ts`) calls `src/hooks/*` directly:
+Calls `src/hooks/*` directly — no binary, no serialization:
 
 ```typescript
 // Common hooks — shared logic
-pi.on('before_agent_start', (event, ctx) => {
-  return sessionStart(store, state, brainPath, wsStorage, event);
-});
+pi.on('before_agent_start', (event, ctx) =>
+  sessionStart(store, state, brainPath, wsStorage, event));
 
 pi.on('tool_call', (event, ctx) => {
-  // Common: tool gating
   const gating = preToolUse(brainPath, event);
   if (gating) return gating;
-  // Pi-only: signal collection
-  collectSignals(state, event);
+  collectSignals(state, event);          // Pi-only: signal collection
 });
 
-// Pi-only — not available in Claude Code
-pi.on('context', (messages) => {
-  return contextInjection(store, state, brainPath, messages);
-});
+pi.on('context', (messages) =>           // Pi-only: per-turn injection
+  contextInjection(store, state, brainPath, messages));
 
 pi.on('tool_result', (event) => collectResultSignals(state, event));
 pi.on('input', (event) => collectInputSignals(state, event));
-
-// Common hooks
 pi.on('session_shutdown', () => sessionEnd(brainPath));
+
 pi.registerCommand('kb', kbCommandHandler(store, state));
 registerTools(pi, store, brainPath, wsStorage);
 ```
 
 ## Packaging
 
-The `kb-hook` binary and `hooks.json` are **profile-scoped** — they belong to the kb profile, not to vfa or Claude Code globally.
+The `kb-hook` binary and `hooks.json` are **profile-scoped** — they belong to the kb profile, not to vfa or any runtime globally.
 
 **Build:** `bun build --compile src/cli/hook.ts --outfile dist/kb-hook`
 
-**Container delivery:** vfa mounts the binary and hooks.json into the container as part of the kb profile's instruction assembly. The profile declares that it needs hooks; vfa wires them for the runtime.
+**Container delivery:** vfa mounts the binary and hooks.json into the container as part of the kb profile's configuration. The profile declares what hooks it needs; vfa wires them for the runtime being used.
 
 **Pi delivery:** The mykb npm package includes the extension. No binary needed — hooks run in-process.
 
 ## Refactoring Required
 
-The current Pi extension has hook logic embedded in `src/extension/hooks/*.ts`. This needs extraction:
+Current Pi extension has hook logic in `src/extension/hooks/*.ts`. Extract to shared layer:
 
-| Current location | Move to | Why |
-|-----------------|---------|-----|
-| `src/extension/hooks/session.ts` (workspace + area index loading) | `src/hooks/session-start.ts` | Shared by Pi + Claude Code |
-| `src/extension/hooks/context.ts` (signal scoring + injection) | `src/hooks/context.ts` | Pi-only but should live in shared hooks for consistency |
-| `src/extension/hooks/tool-gating.ts` (brain file protection) | `src/hooks/pre-tool-use.ts` | Shared by Pi + Claude Code |
-| `src/extension/hooks/signals.ts` (signal collection) | `src/hooks/signals.ts` | Pi-only but part of the hook system |
-| `src/extension/scorer.ts` (area scoring) | `src/hooks/scorer.ts` | Used by context injection and area matching |
-| N/A (new) | `src/hooks/post-bash.ts` | Claude Code capture nudges (error→fix, save reminder) |
-| N/A (new) | `src/hooks/post-edit.ts` | Impact check on edit |
-| N/A (new) | `src/hooks/post-read.ts` | Stale citation check |
-
-The Pi extension becomes a thin adapter that imports from `src/hooks/` and registers on Pi events.
+| Current location | Move to | Shared or runtime-specific? |
+|-----------------|---------|---------------------------|
+| `src/extension/hooks/session.ts` | `src/hooks/session-start.ts` | Shared |
+| `src/extension/hooks/context.ts` | `src/hooks/context.ts` | Shared (Pi uses full pipeline, Claude/Gemini use scorer subset) |
+| `src/extension/hooks/tool-gating.ts` | `src/hooks/pre-tool-use.ts` | Shared |
+| `src/extension/hooks/signals.ts` | `src/hooks/signals.ts` | Shared (Pi uses in-process, Claude/Gemini N/A) |
+| `src/extension/scorer.ts` | `src/hooks/scorer.ts` | Shared (Pi uses for injection, Claude/Gemini use for matching) |
+| N/A (new) | `src/hooks/post-bash.ts` | Shared (capture nudges) |
+| N/A (new) | `src/hooks/post-edit.ts` | Shared (impact check) |
+| N/A (new) | `src/hooks/post-read.ts` | Shared (citation check) |
+| N/A (new) | `src/hooks/before-model.ts` | Gemini-specific (message injection) |
+| N/A (new) | `src/hooks/after-agent.ts` | Gemini-specific (response quality + journal reminder) |
 
 ## Dependencies
 
 | Component | Status | Needed for |
 |-----------|--------|-----------|
 | `src/hooks/` shared layer | **Needs building** (extract from Pi extension) | All hooks |
-| `kb hook <event>` CLI command | **Needs building** | Claude Code delivery |
+| `kb hook <event>` CLI command | **Needs building** | Claude Code + Gemini delivery |
 | `bun build --compile` pipeline | **Needs building** | Fast binary for containers |
-| `kb match <text> --json` | **Needs building** (expose scorer as CLI) | H4, H5 (area matching) |
+| `kb match <text> --json` | **Needs building** (expose scorer as CLI) | H4, H5, H6 (area matching) |
 | `kb check-impact <path> --json` | **Needs building** | H9 (impact check) |
 | `kb check-citation <path> --json` | **Needs building** | H10 (stale citation) |
 | Profile-scoped hook wiring in vfa | **Needs building** | Container delivery |
-| `kb work list`, `kb work show`, `kb list`, `kb load`, `kb save` | **Exists** | H1, H3 |
+| `kb work list/show`, `kb list/load/save` | **Exists** | H1, H3 |
 
 ## Implementation Phases
 
 ### Phase 1: Foundation (H1 + H2 + H3)
 
-Extract shared hook logic from Pi extension. Build `kb hook` CLI command and bun compile pipeline. Implement session start, tool gating, auto-save. Wire into vfa kb profile for Claude Code.
+Extract shared hook logic from Pi extension. Build `kb hook` CLI and bun compile pipeline. Session start, tool gating, auto-save. Wire into vfa kb profile for Claude Code and Gemini.
 
-### Phase 2: Area Matching (H4 + H5)
+### Phase 2: Area Matching (H4 + H5 + H6)
 
-Build `kb match <text> --json` command. Implement prompt and command matching with session dedup. Wire into UserPromptSubmit and PreToolUse(Bash).
+Build `kb match <text> --json`. Prompt and command matching with session dedup. Gemini `BeforeModel` injection for H6.
 
-### Phase 3: Capture Nudges (H7 + H8)
+### Phase 3: Capture Nudges (H7 + H8 + H9 + H10)
 
-Implement error→fix detection and periodic save reminders in post-bash handler. Temp-file state for exit code tracking and command counting.
+Error→fix detection, save reminders, impact checks, citation checks. Build `kb check-impact` and `kb check-citation`.
 
-### Phase 4: Behavioral Enforcement (H11 + H12 + H13)
+### Phase 4: Behavioral Enforcement (H11 + H12 + H13 + H14 + H15)
 
-Claude Code-only: Stop hook journal reminder (prompt type), PreCompact checkpoint, compaction re-injection.
+Journal reminders (Claude: Stop prompt hook, Gemini: AfterAgent retry). Compaction checkpoint and recovery. Gemini response quality check and BeforeModel knowledge injection.
 
-### Phase 5: Provenance (H9 + H10 + H14 + H15)
+### Phase 5: Advanced (H16 + H17 + H18)
 
-Build `kb check-impact` and `kb check-citation`. Implement impact check on edit, stale citation on read, conflict detection, structured output extraction.
+Conflict detection, structured output extraction, Gemini tool selection enforcement.
 
 ## Open Questions
 
-1. **Hook binary name** — `kb-hook` (separate binary) or `kb hook` (subcommand of existing kb CLI)? Separate binary means bun compiles just the hook logic. Subcommand means the full kb CLI is compiled (larger binary, but one tool).
+1. **Hook binary name** — `kb-hook` (separate binary) or `kb hook` (subcommand)? Separate binary = smaller, faster. Subcommand = one tool to install.
 
-2. **Session state in Claude Code** — Temp files (`/tmp/kb-*-$session_id`) for dedup and counters, following the OSB pattern? Or a more structured approach?
+2. **Session state** — Temp files (`/tmp/kb-*-$session_id`) following OSB pattern, or a more structured approach?
 
-3. **Brain path detection** — Hardcode `/home/node/.mykb/brain/` for containers? Use `$MYKB_DIR`? Auto-detect?
+3. **Brain path** — Hardcode `/home/node/.mykb/brain/` for containers? `$MYKB_DIR`? Auto-detect?
 
-4. **Hooks.json delivery** — Should vfa generate `hooks.json` dynamically based on the profile and runtime? Or ship a static `hooks.json` per profile?
+4. **Hooks.json delivery** — vfa generates dynamically per profile+runtime? Or static per-profile?
 
-5. **Pi extension refactor scope** — Extract hooks to `src/hooks/` in the same PR as building `kb hook`, or as a separate preparatory refactor?
+5. **Gemini tool names** — Need to verify exact built-in tool names (`file_edit`, `write_file`, `read_file`, `run_shell_command`). These may differ from what we assumed.
+
+6. **BeforeModel cost** — Gemini's `BeforeModel` fires on every LLM call. Running `kb match` + entry selection on every call may be too expensive. Needs benchmarking or throttling.
+
+7. **Gemini AfterAgent vs Claude Stop** — Both can enforce journaling but through different mechanisms (retry vs continuation). Should the journal check logic be shared or separate?
