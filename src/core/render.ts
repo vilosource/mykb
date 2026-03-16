@@ -1,4 +1,4 @@
-import type { KnowledgeEntry, AreaMetadata } from './types.js';
+import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry } from './types.js';
 import { ProvenanceStatus } from './types.js';
 
 function capitalizeZone(zone: string): string {
@@ -74,4 +74,57 @@ export function renderAreaIndex(areas: AreaMetadata[]): string {
 
 export function renderJson(entries: KnowledgeEntry[]): string {
   return JSON.stringify(entries, null, 2);
+}
+
+export function renderWorkspace(workspace: Workspace, journalEntries: JournalEntry[]): string {
+  const lines: string[] = [];
+
+  lines.push(`# ${workspace.name} (${workspace.id})`);
+
+  // State line
+  const stateFields: string[] = [];
+  if (workspace.state.phase !== undefined) stateFields.push(`Phase: ${workspace.state.phase}`);
+  if (workspace.state.active !== undefined) stateFields.push(`Active: ${workspace.state.active}`);
+  if (workspace.state.blocked !== undefined) stateFields.push(`Blocked: ${workspace.state.blocked}`);
+  if (workspace.state.next !== undefined) stateFields.push(`Next: ${workspace.state.next}`);
+  if (stateFields.length > 0) {
+    lines.push(stateFields.join(' | '));
+  }
+
+  // Areas
+  if (workspace.areas.length > 0) {
+    lines.push(`Areas: ${workspace.areas.join(', ')}`);
+  }
+
+  // Links
+  const linkParts: string[] = [];
+  if (workspace.links.jira) linkParts.push(`JIRA ${workspace.links.jira}`);
+  if (workspace.links.wiki) linkParts.push(`Wiki: ${workspace.links.wiki}`);
+  if (linkParts.length > 0) {
+    lines.push(`Links: ${linkParts.join(' | ')}`);
+  }
+
+  // Documents
+  if (workspace.documents.length > 0) {
+    lines.push('Documents:');
+    for (const doc of workspace.documents) {
+      if (doc.description) {
+        lines.push(`  - ${doc.path} — ${doc.description}`);
+      } else {
+        lines.push(`  - ${doc.path}`);
+      }
+    }
+  }
+
+  // Journal
+  if (journalEntries.length > 0) {
+    lines.push('');
+    lines.push('## Recent Journal');
+    for (const entry of journalEntries) {
+      const dateStr = entry.date.split('T')[0];
+      lines.push(`- ${dateStr}: ${entry.text}`);
+    }
+  }
+
+  return lines.join('\n') + '\n';
 }
