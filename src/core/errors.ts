@@ -39,3 +39,10 @@ export class DatabaseError extends Error {
     this.name = 'DatabaseError';
   }
 }
+
+export class WorkspaceNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkspaceNotFoundError';
+  }
+}

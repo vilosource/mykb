@@ -156,3 +156,62 @@ export interface SearchEngine {
   searchEntries(query: string): KnowledgeEntry[];
   matchAreas(text: string): { area: string; score: number }[];
 }
+
+// --- Workspace types ---
+
+export type WorkspaceState = {
+  phase?: string;
+  active?: string;
+  blocked?: string;
+  next?: string;
+};
+
+export type WorkspaceLinks = {
+  jira?: string;
+  wiki?: string;
+  repos?: string[];
+};
+
+export type WorkspaceDocument = {
+  path: string;
+  description: string | null;
+};
+
+export type Workspace = {
+  id: string;
+  name: string;
+  state: WorkspaceState;
+  areas: string[];
+  links: WorkspaceLinks;
+  documents: WorkspaceDocument[];
+  created: string;
+  updated: string;
+};
+
+export type JournalEntry = {
+  date: string;
+  text: string;
+};
+
+export type CreateWorkspaceOptions = {
+  areas?: string[];
+  links?: WorkspaceLinks;
+};
+
+export interface WorkspaceStorage {
+  createWorkspace(id: string, name: string, options?: CreateWorkspaceOptions): void;
+  readWorkspace(id: string): Workspace | null;
+  updateWorkspaceState(id: string, state: Partial<WorkspaceState>): void;
+  updateWorkspaceLinks(id: string, links: Partial<WorkspaceLinks>): void;
+  linkArea(id: string, area: string): void;
+  unlinkArea(id: string, area: string): void;
+  listWorkspaces(): Workspace[];
+  archiveWorkspace(id: string): void;
+  getActiveWorkspaceId(): string | null;
+  setActiveWorkspaceId(id: string): void;
+  clearActiveWorkspaceId(): void;
+  appendJournal(id: string, text: string): void;
+  readJournal(id: string, limit?: number): JournalEntry[];
+  scanDocumentIndex(id: string): WorkspaceDocument[];
+  updateDocumentIndex(id: string): void;
+}
