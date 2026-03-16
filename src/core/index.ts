@@ -23,6 +23,13 @@ export {
   type AddLinkOptions,
   type KnowledgeStore,
   type SearchEngine,
+  type WorkspaceState,
+  type WorkspaceLinks,
+  type WorkspaceDocument,
+  type Workspace,
+  type JournalEntry,
+  type CreateWorkspaceOptions,
+  type WorkspaceStorage,
 } from './types.js';
 
 export {
@@ -32,6 +39,7 @@ export {
   EntryValidationError,
   StoreCorruptionError,
   DatabaseError,
+  WorkspaceNotFoundError,
 } from './errors.js';
 
 export { resolveBrainPath, brainExists } from './config.js';
@@ -75,8 +83,10 @@ export { regenerateManifest, readManifest } from './manifest.js';
 
 export { MykbStore } from './knowledge-store.js';
 
-export { renderMarkdown, renderContextBlock, renderAreaIndex, renderJson } from './render.js';
+export { renderMarkdown, renderContextBlock, renderAreaIndex, renderJson, renderWorkspace } from './render.js';
 
 export { initBrain, isDirtyShutdown, recoverDirtyShutdown } from './init.js';
 
 export { save, saveAndPush } from './save.js';
+
+export { FileSystemWorkspaceStorage } from './workspace.js';
