@@ -9,7 +9,9 @@ import { initBrain } from '../core/init.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
 import { MykbStore } from '../core/knowledge-store.js';
 import { createArea, listAreas, updateAreaMetadata, deleteArea } from '../core/area.js';
-import { renderMarkdown, renderJson, renderAreaIndex } from '../core/render.js';
+import { renderMarkdown, renderJson, renderAreaIndex, renderWorkspace } from '../core/render.js';
+import { FileSystemWorkspaceStorage } from '../core/workspace.js';
+import type { WorkspaceState } from '../core/types.js';
 import { save, saveAndPush } from '../core/save.js';
 import { hydrateDatabase } from '../core/hydrate.js';
 import { createDatabase } from '../core/db.js';
@@ -59,6 +61,20 @@ function withStore<T>(fn: (store: MykbStore) => T): T {
   } finally {
     store.close();
   }
+}
+
+function createWorkspaceStorage(): FileSystemWorkspaceStorage {
+  const bp = requireBrain();
+  return new FileSystemWorkspaceStorage(bp);
+}
+
+function requireActiveWorkspace(storage: FileSystemWorkspaceStorage): string {
+  const activeId = storage.getActiveWorkspaceId();
+  if (!activeId) {
+    process.stderr.write('Error: no active workspace. Run "kb work start <id>" first.\n');
+    process.exit(1);
+  }
+  return activeId;
 }
 
 const program = new Command();
@@ -525,5 +541,179 @@ function countTypes(entries: { type: string }[]): string {
     .map(([type, count]) => `${count} ${type}${count !== 1 ? 's' : ''}`)
     .join(', ');
 }
+
+// --- work (workspace management) ---
+const workCmd = program.command('work').description('Workspace management');
+
+workCmd
+  .command('create <id> <name>')
+  .description('Create a new workspace')
+  .option('--areas <areas>', 'Comma-separated area IDs')
+  .option('--jira <key>', 'JIRA ticket key')
+  .option('--wiki <url>', 'Wiki URL')
+  .option('--repos <repos>', 'Comma-separated repo paths')
+  .action(
+    (
+      id: string,
+      name: string,
+      opts: { areas?: string; jira?: string; wiki?: string; repos?: string },
+    ) => {
+      const storage = createWorkspaceStorage();
+      const areas = opts.areas ? opts.areas.split(',').map((a) => a.trim()) : undefined;
+      const links: Record<string, unknown> = {};
+      if (opts.jira) links.jira = opts.jira;
+      if (opts.wiki) links.wiki = opts.wiki;
+      if (opts.repos) links.repos = opts.repos.split(',').map((r) => r.trim());
+      storage.createWorkspace(id, name, {
+        areas,
+        links: Object.keys(links).length > 0 ? (links as { jira?: string; wiki?: string; repos?: string[] }) : undefined,
+      });
+      console.log(`Workspace '${id}' created`);
+    },
+  );
+
+workCmd
+  .command('start <id>')
+  .description('Set active workspace')
+  .action((id: string) => {
+    const storage = createWorkspaceStorage();
+    const ws = storage.readWorkspace(id);
+    if (!ws) {
+      process.stderr.write(`Error: workspace '${id}' not found.\n`);
+      process.exit(1);
+    }
+    storage.setActiveWorkspaceId(id);
+    const journal = storage.readJournal(id, 3);
+    process.stdout.write(renderWorkspace(ws, journal));
+  });
+
+workCmd
+  .command('stop')
+  .description('Clear active workspace')
+  .action(() => {
+    const storage = createWorkspaceStorage();
+    storage.clearActiveWorkspaceId();
+    console.log('Workspace stopped');
+  });
+
+workCmd
+  .command('state')
+  .description('Update active workspace state')
+  .option('--phase <phase>', 'Current phase')
+  .option('--active <active>', 'What is currently active')
+  .option('--blocked <blocked>', 'What is blocked')
+  .option('--next <next>', 'What is next')
+  .action((opts: { phase?: string; active?: string; blocked?: string; next?: string }) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const state: Partial<WorkspaceState> = {};
+    if (opts.phase !== undefined) state.phase = opts.phase;
+    if (opts.active !== undefined) state.active = opts.active;
+    if (opts.blocked !== undefined) state.blocked = opts.blocked;
+    if (opts.next !== undefined) state.next = opts.next;
+    storage.updateWorkspaceState(activeId, state);
+    console.log(`Workspace '${activeId}' state updated`);
+  });
+
+workCmd
+  .command('journal [text]')
+  .description('Append or show journal entries')
+  .option('--show [count]', 'Show last N journal entries')
+  .action((text: string | undefined, opts: { show?: boolean | string }) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+
+    if (opts.show !== undefined) {
+      // Show mode
+      const limit = typeof opts.show === 'string' ? parseInt(opts.show, 10) : 5;
+      const entries = storage.readJournal(activeId, limit);
+      if (entries.length === 0) {
+        console.log('No journal entries');
+        return;
+      }
+      for (const entry of entries) {
+        const dateStr = entry.date.split('T')[0];
+        console.log(`- ${dateStr}: ${entry.text}`);
+      }
+      return;
+    }
+
+    if (!text) {
+      process.stderr.write('Error: provide text or use --show\n');
+      process.exit(1);
+    }
+
+    storage.appendJournal(activeId, text);
+    console.log(`Journal entry added to '${activeId}'`);
+  });
+
+workCmd
+  .command('link <area>')
+  .description('Link an area to active workspace')
+  .action((area: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    storage.linkArea(activeId, area);
+    console.log(`Area '${area}' linked to '${activeId}'`);
+  });
+
+workCmd
+  .command('unlink <area>')
+  .description('Unlink an area from active workspace')
+  .action((area: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    storage.unlinkArea(activeId, area);
+    console.log(`Area '${area}' unlinked from '${activeId}'`);
+  });
+
+workCmd
+  .command('list')
+  .description('List all workspaces')
+  .action(() => {
+    const storage = createWorkspaceStorage();
+    const workspaces = storage.listWorkspaces();
+    if (workspaces.length === 0) {
+      console.log('No workspaces found');
+      return;
+    }
+    const activeId = storage.getActiveWorkspaceId();
+    for (const ws of workspaces) {
+      const marker = ws.id === activeId ? ' *' : '';
+      console.log(`${ws.id}\t${ws.name}${marker}`);
+    }
+  });
+
+workCmd
+  .command('show [id]')
+  .description('Show workspace details')
+  .action((id?: string) => {
+    const storage = createWorkspaceStorage();
+    const wsId = id ?? storage.getActiveWorkspaceId();
+    if (!wsId) {
+      process.stderr.write('Error: no active workspace. Provide an id or run "kb work start <id>".\n');
+      process.exit(1);
+    }
+    const ws = storage.readWorkspace(wsId);
+    if (!ws) {
+      process.stderr.write(`Error: workspace '${wsId}' not found.\n`);
+      process.exit(1);
+    }
+    const journal = storage.readJournal(wsId, 5);
+    process.stdout.write(renderWorkspace(ws, journal));
+  });
+
+workCmd
+  .command('archive <id>')
+  .description('Archive a workspace')
+  .action((id: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = storage.getActiveWorkspaceId();
+    storage.archiveWorkspace(id);
+    if (activeId === id) {
+      storage.clearActiveWorkspaceId();
+    }
+    console.log(`Workspace '${id}' archived`);
+  });
 
 program.parse();
