@@ -228,3 +228,70 @@ describe('FileSystemWorkspaceStorage CRUD', () => {
     });
   });
 });
+
+describe('FileSystemWorkspaceStorage Journal', () => {
+  it('appendJournal appends to journal.jsonl', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      storage.appendJournal('my-proj', 'Set up CI pipeline');
+      storage.appendJournal('my-proj', 'Configured DNS');
+
+      const journalFile = path.join(brainPath, 'workspaces', 'my-proj', 'journal.jsonl');
+      expect(fs.existsSync(journalFile)).toBe(true);
+
+      const lines = fs.readFileSync(journalFile, 'utf-8').trim().split('\n');
+      expect(lines).toHaveLength(2);
+
+      const entry0 = JSON.parse(lines[0]) as { date: string; text: string };
+      expect(entry0.text).toBe('Set up CI pipeline');
+      expect(entry0.date).toBeDefined();
+
+      const entry1 = JSON.parse(lines[1]) as { date: string; text: string };
+      expect(entry1.text).toBe('Configured DNS');
+    });
+  });
+
+  it('readJournal returns entries most recent last', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      storage.appendJournal('my-proj', 'First entry');
+      storage.appendJournal('my-proj', 'Second entry');
+      storage.appendJournal('my-proj', 'Third entry');
+
+      const entries = storage.readJournal('my-proj');
+      expect(entries).toHaveLength(3);
+      expect(entries[0].text).toBe('First entry');
+      expect(entries[2].text).toBe('Third entry');
+    });
+  });
+
+  it('readJournal with limit returns last N entries', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      storage.appendJournal('my-proj', 'First');
+      storage.appendJournal('my-proj', 'Second');
+      storage.appendJournal('my-proj', 'Third');
+
+      const entries = storage.readJournal('my-proj', 2);
+      expect(entries).toHaveLength(2);
+      expect(entries[0].text).toBe('Second');
+      expect(entries[1].text).toBe('Third');
+    });
+  });
+
+  it('readJournal with empty/no journal returns empty array', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const entries = storage.readJournal('my-proj');
+      expect(entries).toEqual([]);
+    });
+  });
+});
