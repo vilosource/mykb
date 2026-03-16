@@ -6,6 +6,7 @@ export type Signal = {
 
 export class SessionState {
   loadedAreas: Set<string> = new Set();
+  boostedAreas: Set<string> = new Set();
   turnCount: number = 0;
   signals: Signal[] = [];
 
@@ -23,5 +24,13 @@ export class SessionState {
 
   isAreaLoaded(area: string): boolean {
     return this.loadedAreas.has(area);
+  }
+
+  setBoostedAreas(areas: string[]): void {
+    this.boostedAreas = new Set(areas);
+  }
+
+  getBoostedAreas(): Set<string> {
+    return this.boostedAreas;
   }
 }
