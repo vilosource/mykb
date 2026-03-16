@@ -20,19 +20,15 @@ Completed: 2026-03-16
 
 ## What didn't work
 
-1. **Journal date format inconsistency.** The CLI `journal --show` displays ISO timestamps (2026-03-16T07:42:03.123Z) but the design doc showed date-only format (2026-03-16). Minor cosmetic issue, not a functional problem.
-
-2. **Bundle rebuild as manual step.** After implementing W3, the esbuild bundle + container npm install had to be done manually before acceptance testing. This should be scripted.
+1. **Bundle rebuild as manual step.** After implementing W3, the esbuild bundle + container npm install had to be done manually before acceptance testing. Fixed: added `npm run bundle` script.
 
 ## What could be improved
 
-1. **Bundle rebuild script.** Add an npm script: `"bundle": "esbuild src/extension/index.ts --bundle --platform=node --format=esm --outfile=dist/bundle/index.js --external:better-sqlite3 --target=esnext --legal-comments=none"`. This was a recommendation from the core retrospective that was not implemented.
+1. **Bundle rebuild script.** Fixed: added `npm run bundle` to package.json.
 
-2. **Acceptance test automation.** The 4 acceptance tests and 6-step e2e journey should be scripted as a shell script (`scripts/acceptance-test.sh`) that sets up the brain, runs vfa commands, and checks output with grep. Currently manual.
+2. **Acceptance test automation.** Fixed: created `scripts/acceptance-test.sh` with exhaustive automated test suite (positive, negative, edge cases, multi-session, adversarial).
 
-3. **Date formatting in journal display.** Consider formatting journal dates as date-only (YYYY-MM-DD) in renderWorkspace and CLI output for readability, while keeping full ISO in the JSONL storage.
-
-4. **Document index testing with real Pi.** The document index feature (scanDocumentIndex, updateDocumentIndex) was tested at the unit level but not via LLM acceptance tests. The AI creating a doc in the workspace directory and the index picking it up on save is the intended flow — worth testing when time allows.
+3. **Document index testing with real Pi.** The document index feature (scanDocumentIndex, updateDocumentIndex) was tested at the unit level but not via LLM acceptance tests. Now covered in the automated acceptance test suite.
 
 ## Metrics
 
