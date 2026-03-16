@@ -513,7 +513,16 @@ vfa mounts the appropriate `hooks.json` and `kb-hook` binary based on the runtim
 
 ## Open Questions
 
-All design questions resolved (D1-D9). Remaining unknowns require spikes:
+All design questions resolved (D1-D9). Remaining unknowns require spikes before implementation can begin.
 
-1. **BeforeModel cost** — [`docs/spikes/before-model-cost-SPIKE.md`](spikes/before-model-cost-SPIKE.md). Determines whether H15 (knowledge-aware model requests) uses BeforeModel or falls back to BeforeAgent.
-2. **Pi hook extraction** — [`docs/spikes/pi-hook-extraction-SPIKE.md`](spikes/pi-hook-extraction-SPIKE.md). Determines whether esbuild bundles extracted imports correctly and Pi loads the result.
+## Status
+
+**Work in progress.** Design complete. Two spikes must be run before Phase 1 implementation.
+
+## Related Documents
+
+- [BeforeModel cost spike](spikes/before-model-cost-SPIKE.md) — Determines whether H15 uses Gemini BeforeModel or falls back to BeforeAgent
+- [Pi hook extraction spike](spikes/pi-hook-extraction-SPIKE.md) — Determines whether esbuild bundles extracted imports correctly and Pi loads the result
+- [Workspaces design](workspaces-DESIGN.md) — Workspace feature that hooks interact with
+- [Implementation plan](implementation-PLAN.md) — Overall mykb implementation phases
+- [OSB hook system](https://github.com/vilosource/osb/blob/main/docs/architecture/hook-system.md) — Reference implementation for Claude Code nudge-based hooks
