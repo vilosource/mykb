@@ -2,6 +2,7 @@ import type { ExtensionAPI } from './pi-types.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
 import { initBrain } from '../core/init.js';
 import { MykbStore } from '../core/knowledge-store.js';
+import { FileSystemWorkspaceStorage } from '../core/workspace.js';
 import { SessionState } from './state.js';
 import { registerSessionHooks } from './hooks/session.js';
 import { registerTools } from '../tools/index.js';
@@ -24,9 +25,10 @@ export default function (pi: ExtensionAPI): void {
 
   const store = MykbStore.open(brainPath);
   const state = new SessionState();
+  const wsStorage = new FileSystemWorkspaceStorage(brainPath);
 
   // Session lifecycle hooks (includes Tier 1 — before_agent_start area index)
-  registerSessionHooks(pi, store, state, brainPath);
+  registerSessionHooks(pi, store, state, brainPath, wsStorage);
 
   // Tier 2 — Context injection on each turn
   pi.on('context', createContextHandler(store, state, brainPath));
@@ -53,6 +55,6 @@ export default function (pi: ExtensionAPI): void {
   // Tier 3 — /kb command for on-demand area loading
   pi.registerCommand('kb', createKbCommandHandler(store, state));
 
-  // Register tools
-  registerTools(pi, store, brainPath);
+  // Register tools (with workspace storage for workspace tools)
+  registerTools(pi, store, brainPath, wsStorage);
 }
