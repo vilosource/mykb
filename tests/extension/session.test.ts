@@ -6,7 +6,9 @@ import { MykbStore } from '../../src/core/knowledge-store.js';
 import { initBrain } from '../../src/core/init.js';
 import { SessionState } from '../../src/extension/state.js';
 import { registerSessionHooks } from '../../src/extension/hooks/session.js';
+import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
 import type { ExtensionAPI } from '../../src/extension/pi-types.js';
+import type { BeforeAgentStartResult } from '../../src/extension/pi-types.js';
 
 function createMockPi(): ExtensionAPI & {
   handlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
@@ -90,6 +92,86 @@ describe('registerSessionHooks', () => {
 
       const startHandler = pi.handlers.get('session_start')!;
       await expect(startHandler()).resolves.not.toThrow();
+
+      store.close();
+    });
+  });
+
+  it('before_agent_start with active workspace injects workspace context', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      const store = MykbStore.open(brainPath);
+      const state = new SessionState();
+      const pi = createMockPi();
+
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+      wsStorage.createWorkspace('test-ws', 'Test Workspace', { areas: ['networking'] });
+      wsStorage.setActiveWorkspaceId('test-ws');
+      wsStorage.appendJournal('test-ws', 'Previous session: configured DNS');
+
+      registerSessionHooks(pi, store, state, brainPath, wsStorage);
+
+      const handler = pi.handlers.get('before_agent_start')!;
+      const result = (await handler({ systemPrompt: 'base prompt' }, {})) as BeforeAgentStartResult;
+
+      expect(result.systemPrompt).toContain('<mykb-workspace>');
+      expect(result.systemPrompt).toContain('Test Workspace');
+      expect(result.systemPrompt).toContain('configured DNS');
+      expect(result.systemPrompt).toContain('</mykb-workspace>');
+
+      // boostedAreas should be set
+      expect(state.getBoostedAreas().has('networking')).toBe(true);
+
+      store.close();
+    });
+  });
+
+  it('before_agent_start without active workspace does not inject workspace context', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      const store = MykbStore.open(brainPath);
+      const state = new SessionState();
+      const pi = createMockPi();
+
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+      // No active workspace set
+
+      registerSessionHooks(pi, store, state, brainPath, wsStorage);
+
+      const handler = pi.handlers.get('before_agent_start')!;
+      const result = (await handler({ systemPrompt: 'base prompt' }, {})) as BeforeAgentStartResult;
+
+      expect(result.systemPrompt).not.toContain('<mykb-workspace>');
+      expect(state.getBoostedAreas().size).toBe(0);
+
+      store.close();
+    });
+  });
+
+  it('session_shutdown with active workspace updates timestamp', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      const store = MykbStore.open(brainPath);
+      const state = new SessionState();
+      const pi = createMockPi();
+
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+      wsStorage.createWorkspace('test-ws', 'Test Workspace');
+      wsStorage.setActiveWorkspaceId('test-ws');
+
+      const wsBefore = wsStorage.readWorkspace('test-ws')!;
+      const updatedBefore = wsBefore.updated;
+
+      // Small delay so timestamp differs
+      await new Promise((r) => setTimeout(r, 10));
+
+      registerSessionHooks(pi, store, state, brainPath, wsStorage);
+
+      const shutdownHandler = pi.handlers.get('session_shutdown')!;
+      await shutdownHandler();
+
+      const wsAfter = wsStorage.readWorkspace('test-ws')!;
+      expect(wsAfter.updated).not.toBe(updatedBefore);
 
       store.close();
     });
