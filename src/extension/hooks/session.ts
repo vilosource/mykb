@@ -7,13 +7,14 @@ import { isDirtyShutdown, recoverDirtyShutdown } from '../../core/init.js';
 import { save } from '../../core/save.js';
 import { brainExists } from '../../core/config.js';
 import { readManifest } from '../../core/manifest.js';
-import { renderAreaIndex } from '../../core/render.js';
-import type { AreaMetadata } from '../../core/types.js';
+import { renderAreaIndex, renderWorkspace } from '../../core/render.js';
+import type { AreaMetadata, WorkspaceStorage } from '../../core/types.js';
 
 export function createBeforeAgentStartHandler(
   _store: MykbStore,
-  _state: SessionState,
+  state: SessionState,
   brainPath: string,
+  wsStorage?: WorkspaceStorage,
 ): (event: unknown, ctx: unknown) => Promise<BeforeAgentStartResult> {
   return async (event: unknown, _ctx: unknown): Promise<BeforeAgentStartResult> => {
     // Pi passes the current system prompt in the event — we must APPEND, not replace
@@ -40,8 +41,22 @@ export function createBeforeAgentStartHandler(
       areaBlock = `<mykb-areas>\n${index}</mykb-areas>`;
     }
 
+    let workspaceBlock = '';
+    if (wsStorage) {
+      const activeId = wsStorage.getActiveWorkspaceId();
+      if (activeId) {
+        const workspace = wsStorage.readWorkspace(activeId);
+        if (workspace) {
+          const journalEntries = wsStorage.readJournal(activeId, 3);
+          const rendered = renderWorkspace(workspace, journalEntries);
+          workspaceBlock = `\n\n<mykb-workspace>\n${rendered}</mykb-workspace>\n`;
+          state.setBoostedAreas(workspace.areas);
+        }
+      }
+    }
+
     return {
-      systemPrompt: currentPrompt + '\n\n' + areaBlock + '\n',
+      systemPrompt: currentPrompt + '\n\n' + areaBlock + '\n' + workspaceBlock,
     };
   };
 }
@@ -51,6 +66,7 @@ export function registerSessionHooks(
   store: MykbStore,
   state: SessionState,
   brainPath: string,
+  wsStorage?: WorkspaceStorage,
 ): void {
   pi.on('session_start', async () => {
     // Auto-init brain if missing
@@ -64,9 +80,16 @@ export function registerSessionHooks(
     }
   });
 
-  pi.on('before_agent_start', createBeforeAgentStartHandler(store, state, brainPath));
+  pi.on('before_agent_start', createBeforeAgentStartHandler(store, state, brainPath, wsStorage));
 
   pi.on('session_shutdown', async () => {
     save(brainPath);
+
+    if (wsStorage) {
+      const activeId = wsStorage.getActiveWorkspaceId();
+      if (activeId) {
+        wsStorage.updateWorkspaceState(activeId, {});
+      }
+    }
   });
 }
