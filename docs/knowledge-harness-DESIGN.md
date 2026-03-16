@@ -142,7 +142,7 @@ Build:
 | Hook | What it does | Pi event | Claude Code event | Gemini event |
 |------|-------------|----------|------------------|-------------|
 | Session start context | Load workspace state + area index, inject into context | `before_agent_start` | `SessionStart` | `SessionStart` |
-| Tool gating | Block direct writes to brain files, redirect to `kb add` | `tool_call` | `PreToolUse(Edit\|Write)` | `BeforeTool(file_edit\|write_file)` |
+| Tool gating | Block direct writes to brain files, redirect to `kb add` | `tool_call` | `PreToolUse(Edit\|Write)` | `BeforeTool(replace\|write_file)` |
 | Area matching (prompt) | Match user prompt against areas, suggest loading | `input` (signal) | `UserPromptSubmit` | `BeforeAgent` |
 | Area matching (command) | Match shell command against areas | `tool_call` (signal) | `PreToolUse(Bash)` | `BeforeTool(run_shell_command)` |
 | Session dedup | Track suggested areas per session | In-process state | Temp files | Temp files |
@@ -210,14 +210,14 @@ Build:
 |---|------|--------|-----|------------|--------|
 | H7 | Error→fix gotcha | Shared logic | `tool_result` → nudge | `PostToolUse(Bash)` → nudge | `AfterTool(run_shell_command)` → nudge |
 | H8 | Save reminder | Shared logic | Counter in state | Counter in temp file | Counter in temp file |
-| H9 | Impact on edit | Shared logic | `tool_result` → nudge | `PostToolUse(Edit\|Write)` → nudge | `AfterTool(file_edit)` → nudge |
+| H9 | Impact on edit | Shared logic | `tool_result` → nudge | `PostToolUse(Edit\|Write)` → nudge | `AfterTool(replace\|write_file)` → nudge |
 | H10 | Stale citation | Shared logic | `tool_result` → nudge | `PostToolUse(Read)` → nudge | `AfterTool(read_file)` → nudge |
 
 ### Priority 4: Behavioral Enforcement
 
 | # | Hook | Pi | Claude Code | Gemini |
 |---|------|-----|------------|--------|
-| H11 | Journal reminder | N/A | `Stop` → prompt hook forces continuation | `AfterAgent` → deny + "please journal" correction |
+| H11 | Journal reminder | N/A | `Stop` → prompt hook forces continuation | `BeforeAgent` → nudge "haven't journaled yet" + `SessionEnd` best-effort auto-journal |
 | H12 | Compaction checkpoint | N/A | `PreCompact` → journal + save | `PreCompress` → journal + save |
 | H13 | Compaction recovery | N/A | `SessionStart(compact)` → re-inject context | `SessionStart(compress)` → re-inject context |
 | H14 | Response quality check | N/A | N/A | `AfterAgent` → deny if response didn't use available knowledge |
@@ -285,7 +285,7 @@ Build:
     {"hooks": [{"type": "command", "command": "kb-hook user-prompt --format gemini"}]}
   ],
   "BeforeTool": [
-    {"matcher": "file_edit|write_file",
+    {"matcher": "replace|write_file",
      "hooks": [{"type": "command", "command": "kb-hook pre-tool-use --format gemini"}]},
     {"matcher": "run_shell_command",
      "hooks": [{"type": "command", "command": "kb-hook pre-bash --format gemini"}]}
@@ -293,7 +293,7 @@ Build:
   "AfterTool": [
     {"matcher": "run_shell_command",
      "hooks": [{"type": "command", "command": "kb-hook post-bash --format gemini"}]},
-    {"matcher": "file_edit|write_file",
+    {"matcher": "replace|write_file",
      "hooks": [{"type": "command", "command": "kb-hook post-edit --format gemini"}]},
     {"matcher": "read_file",
      "hooks": [{"type": "command", "command": "kb-hook post-read --format gemini"}]}
@@ -402,18 +402,81 @@ Journal reminders (Claude: Stop prompt hook, Gemini: AfterAgent retry). Compacti
 
 Conflict detection, structured output extraction, Gemini tool selection enforcement.
 
+## Decisions
+
+### D1: Hook binary — separate `kb-hook` command
+
+Separate compiled binary via `bun build --compile`. Accepts the more complex install process (two binaries: `kb` for CLI use, `kb-hook` for hook events) in exchange for smaller binary size and cleaner separation of concerns.
+
+### D2: Brain path — `$MYKB_DIR` environment variable, no hardcoding
+
+mykb already respects `$MYKB_DIR` (defaults to `~/.mykb`). The vfa profile sets this in its `env` section:
+
+```yaml
+env:
+  MYKB_DIR: /home/node/.mykb
+```
+
+The `kb-hook` binary uses the same `resolveBrainPath()` as the rest of mykb. No hardcoded paths anywhere. If someone mounts the brain at a different location, they change the profile env, not the code.
+
+### D3: Hooks.json delivery — static files, convention-based
+
+Pre-written hooks.json files per runtime, stored alongside the profile:
+
+```
+~/.vf-agents/hooks/kb/
+  claude/hooks.json
+  gemini/hooks.json
+```
+
+vfa mounts the right one based on the provider's runtime. No dynamic generation, no startup cost. Files are part of the mykb distribution and versioned with the hook scripts.
+
+For Claude Code: mounted as a plugin's `hooks/hooks.json`.
+For Gemini CLI: merged into `.gemini/settings.json` or extension hooks.
+
+### D4: Gemini tool names — verified
+
+| Function | Gemini tool name | Claude Code tool name |
+|----------|-----------------|----------------------|
+| Read file | `read_file` | `Read` |
+| Write file | `write_file` | `Write` |
+| Edit file | `replace` | `Edit` |
+| Shell command | `run_shell_command` | `Bash` |
+| Search content | `search_file_content` | `Grep` |
+| Glob files | `glob` | `Glob` |
+
+Source: [Gemini CLI tools reference](https://geminicli.com/docs/reference/tools/)
+
+### D5: Journal enforcement strategy — different per runtime
+
+**The check** is shared: "was `kb work journal` called during this session?" Lives in `src/hooks/stop.ts`, reads session state file.
+
+**The delivery** differs:
+
+| Runtime | Mechanism | Why |
+|---------|-----------|-----|
+| Claude Code | `Stop` prompt hook — forces continuation with "please journal" | Efficient: extends conversation, doesn't rewrite. Claude adds journal command. |
+| Gemini CLI | `BeforeAgent` nudge on next prompt — injects "you haven't journaled yet" as `additionalContext` | Avoids wasteful `AfterAgent` retry which would regenerate the entire response. |
+| Gemini CLI (backup) | `SessionEnd` — best-effort `kb work journal "auto: session ended without journal"` | Catches the case where user exits without another prompt. |
+| Pi | Instructions only — no stop/end hook available | Pi's `session_shutdown` runs `kb save` but can't enforce journaling. |
+
+**`AfterAgent` retry is reserved for quality enforcement only** — "your response didn't use available knowledge, try again." This is Gemini-specific (H14) and justifies the retry cost because it produces a better answer, not just an appended action.
+
+### D6: BeforeModel — needs spike before committing
+
+Gemini's `BeforeModel` fires on every LLM call (potentially 1-5 per turn). Running `kb match` + entry selection on each call may add unacceptable latency. A spike is required before committing to H15 (knowledge-aware model requests).
+
+Spike document: [`docs/spikes/before-model-cost-SPIKE.md`](spikes/before-model-cost-SPIKE.md)
+
+Decision criteria:
+- <100ms per invocation → use BeforeModel for injection
+- 100-200ms → use selectively (first turn only, or throttled)
+- \>200ms → fall back to BeforeAgent nudge only
+
 ## Open Questions
 
-1. **Hook binary name** — `kb-hook` (separate binary) or `kb hook` (subcommand)? Separate binary = smaller, faster. Subcommand = one tool to install.
+1. **Session state format** — Single JSON file (`/tmp/kb-hook-$session_id.json`) with all state, or multiple temp files per concern (OSB pattern)? Single file is cleaner for debugging; multiple files match the proven pattern.
 
-2. **Session state** — Temp files (`/tmp/kb-*-$session_id`) following OSB pattern, or a more structured approach?
+2. **Pi extension refactor scope** — Extract hooks to `src/hooks/` in the same PR as building `kb-hook`, or as a separate preparatory refactor?
 
-3. **Brain path** — Hardcode `/home/node/.mykb/brain/` for containers? `$MYKB_DIR`? Auto-detect?
-
-4. **Hooks.json delivery** — vfa generates dynamically per profile+runtime? Or static per-profile?
-
-5. **Gemini tool names** — Need to verify exact built-in tool names (`file_edit`, `write_file`, `read_file`, `run_shell_command`). These may differ from what we assumed.
-
-6. **BeforeModel cost** — Gemini's `BeforeModel` fires on every LLM call. Running `kb match` + entry selection on every call may be too expensive. Needs benchmarking or throttling.
-
-7. **Gemini AfterAgent vs Claude Stop** — Both can enforce journaling but through different mechanisms (retry vs continuation). Should the journal check logic be shared or separate?
+3. **Gemini extension packaging** — Gemini CLI supports extensions with `hooks/hooks.json`. Should `kb-hook` be packaged as a Gemini extension, matching how the Claude Code version would be a Claude plugin?
