@@ -56,8 +56,8 @@ export function createContextHandler(
       return messages;
     }
 
-    // Score areas based on accumulated signals
-    const scored = scoreAreas(state.signals, providers, areas, store);
+    // Score areas based on accumulated signals (with workspace boost)
+    const scored = scoreAreas(state.signals, providers, areas, store, state.getBoostedAreas());
 
     if (scored.size === 0) {
       state.clearSignals();

@@ -83,21 +83,23 @@ export class FilePathSignalProvider implements SignalProvider {
   }
 }
 
+const WORKSPACE_BOOST = 0.5;
+
 /**
  * Score areas based on accumulated signals from multiple providers.
  * Returns a map of area ID to aggregated score.
+ * Areas in boostedAreas (from active workspace) get a base score boost.
  */
 export function scoreAreas(
   signals: Signal[],
   providers: SignalProvider[],
   areas: AreaMetadata[],
   _store: MykbStore,
+  boostedAreas?: Set<string>,
 ): Map<string, number> {
   // _store reserved for future FTS5-based deep matching
   void _store;
   const scores = new Map<string, number>();
-
-  if (signals.length === 0) return scores;
 
   for (const signal of signals) {
     for (const provider of providers) {
@@ -105,6 +107,16 @@ export function scoreAreas(
       for (const result of results) {
         const current = scores.get(result.area) ?? 0;
         scores.set(result.area, current + result.score);
+      }
+    }
+  }
+
+  // Apply workspace boost to linked areas
+  if (boostedAreas && boostedAreas.size > 0) {
+    for (const area of areas) {
+      if (boostedAreas.has(area.id)) {
+        const current = scores.get(area.id) ?? 0;
+        scores.set(area.id, current + WORKSPACE_BOOST);
       }
     }
   }
