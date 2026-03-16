@@ -473,10 +473,47 @@ Decision criteria:
 - 100-200ms → use selectively (first turn only, or throttled)
 - \>200ms → fall back to BeforeAgent nudge only
 
+### D7: Session state — single JSON file
+
+`kb-hook` is a TypeScript binary. JSON is its native language. Reading/writing a single state file is one line of code. The OSB pattern of multiple flat files was designed for shell scripts where JSON parsing is painful — that doesn't apply here.
+
+Single file at `/tmp/kb-hook-$session_id.json`:
+```json
+{
+  "suggested_areas": ["networking", "docker-swarm"],
+  "bash_count": 15,
+  "prev_exit_code": 1,
+  "journal_written": false
+}
+```
+
+Containers are ephemeral — `/tmp` is auto-cleaned. Corruption risk is acceptable (worst case: one extra area suggestion mid-session). Performance is irrelevant — process startup (~50ms) dominates over file I/O (<1ms).
+
+### D8: Pi extension refactor — separate PR, spike first
+
+Two-step approach:
+1. **Spike first** — Verify extraction doesn't break Pi's esbuild bundling and extension loading. See [`docs/spikes/pi-hook-extraction-SPIKE.md`](spikes/pi-hook-extraction-SPIKE.md). Key risks: circular imports between `src/hooks/` and `src/extension/`, `SessionState` dependency, `better-sqlite3` native module in bun compile, and esbuild import path resolution.
+2. **Phase 1a** — Extract `src/extension/hooks/*.ts` → `src/hooks/*.ts`. Pi extension becomes thin adapter. Run all 234 unit tests + Pi acceptance tests. Separate PR.
+3. **Phase 1b** — Build `kb-hook` CLI on top of extracted layer. Separate PR.
+
+Rationale: the extraction is a pure refactor — if it breaks something, the cause is clear. Mixing refactor + new feature makes debugging harder. Pi's extension loading has bitten us before.
+
+### D9: Packaging — profile-scoped only, no extensions
+
+Hooks only work inside vfa containers (brain mounted, binary available, profile env set). There is no standalone use case today. Packaging as Claude Code plugin or Gemini extension would be designing for a use case that doesn't exist.
+
+```
+~/.vf-agents/hooks/kb/
+  claude/hooks.json
+  gemini/hooks.json
+  bin/kb-hook
+```
+
+vfa mounts the appropriate `hooks.json` and `kb-hook` binary based on the runtime. When standalone usage (host without vfa) becomes needed, we package as extensions then.
+
 ## Open Questions
 
-1. **Session state format** — Single JSON file (`/tmp/kb-hook-$session_id.json`) with all state, or multiple temp files per concern (OSB pattern)? Single file is cleaner for debugging; multiple files match the proven pattern.
+All design questions resolved (D1-D9). Remaining unknowns require spikes:
 
-2. **Pi extension refactor scope** — Extract hooks to `src/hooks/` in the same PR as building `kb-hook`, or as a separate preparatory refactor?
-
-3. **Gemini extension packaging** — Gemini CLI supports extensions with `hooks/hooks.json`. Should `kb-hook` be packaged as a Gemini extension, matching how the Claude Code version would be a Claude plugin?
+1. **BeforeModel cost** — [`docs/spikes/before-model-cost-SPIKE.md`](spikes/before-model-cost-SPIKE.md). Determines whether H15 (knowledge-aware model requests) uses BeforeModel or falls back to BeforeAgent.
+2. **Pi hook extraction** — [`docs/spikes/pi-hook-extraction-SPIKE.md`](spikes/pi-hook-extraction-SPIKE.md). Determines whether esbuild bundles extracted imports correctly and Pi loads the result.
