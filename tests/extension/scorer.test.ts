@@ -120,6 +120,45 @@ describe('scoreAreas', () => {
       }
     });
   });
+
+  it('with workspace boost adds score to boosted areas', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      const store = MykbStore.open(brainPath);
+      try {
+        // No signals that match any area — only the boost should produce a score
+        const signals: Signal[] = [makeSignal('keyword', 'something unrelated xyz')];
+        const providers = [new KeywordSignalProvider()];
+        const boostedAreas = new Set(['networking']);
+        const scores = scoreAreas(signals, providers, areas, store, boostedAreas);
+
+        // Networking should have a score from the workspace boost
+        expect(scores.get('networking')).toBeGreaterThan(0);
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it('with workspace boost — unboosted areas unaffected', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      const store = MykbStore.open(brainPath);
+      try {
+        // No matching signals
+        const signals: Signal[] = [makeSignal('keyword', 'something unrelated xyz')];
+        const providers = [new KeywordSignalProvider()];
+        const boostedAreas = new Set(['networking']);
+        const scores = scoreAreas(signals, providers, areas, store, boostedAreas);
+
+        // ci-pipelines and secrets should not have any score
+        expect(scores.has('ci-pipelines')).toBe(false);
+        expect(scores.has('secrets')).toBe(false);
+      } finally {
+        store.close();
+      }
+    });
+  });
 });
 
 describe('selectEntriesForInjection', () => {
