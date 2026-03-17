@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readVersion } from './version.js';
 import { initBrain } from '../core/init.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
 import { MykbStore } from '../core/knowledge-store.js';
@@ -25,20 +26,6 @@ import type {
 } from '../core/types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function readVersion(): string {
-  // Walk up to find package.json
-  let dir = __dirname;
-  for (let i = 0; i < 5; i++) {
-    const pkgPath = path.join(dir, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as { version: string };
-      return pkg.version;
-    }
-    dir = path.dirname(dir);
-  }
-  return '0.0.0';
-}
 
 function getBrainPath(): string {
   return resolveBrainPath();
@@ -82,7 +69,7 @@ const program = new Command();
 program
   .name('kb')
   .description('Knowledge management CLI for AI coding agents')
-  .version(readVersion());
+  .version(readVersion(__dirname));
 
 // --- init ---
 const initCmd = program.command('init').description('Initialize a new brain');
