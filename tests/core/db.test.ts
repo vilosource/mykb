@@ -8,6 +8,7 @@ import {
   queryEntries,
   deleteEntry,
   searchEntries,
+  sanitizeFtsQuery,
   upsertArea,
   listAreas,
   getAreaStats,
@@ -322,6 +323,61 @@ describe('searchEntries', () => {
     const results = searchEntries(db, 'kubernetes');
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe('tag00001');
+
+    db.close();
+  });
+});
+
+// --- 3b. sanitizeFtsQuery ---
+
+describe('sanitizeFtsQuery', () => {
+  const cases = [
+    { input: 'fi-abakus', expected: '"fi-abakus"', name: 'hyphenated term' },
+    { input: 'DNS', expected: '"DNS"', name: 'simple term' },
+    { input: 'postnord server', expected: '"postnord" "server"', name: 'multi-word AND' },
+    { input: 'fi-sr-012', expected: '"fi-sr-012"', name: 'multiple hyphens' },
+    { input: '', expected: '', name: 'empty string' },
+    { input: '  spaced  ', expected: '"spaced"', name: 'extra whitespace' },
+    { input: 'PLANDENT-004', expected: '"PLANDENT-004"', name: 'decision ID pattern' },
+  ];
+
+  for (const { input, expected, name } of cases) {
+    it(`should handle ${name}: "${input}" → ${expected || '""'}`, () => {
+      expect(sanitizeFtsQuery(input)).toBe(expected);
+    });
+  }
+});
+
+// --- 3c. searchEntries with hyphenated text ---
+
+describe('searchEntries with hyphenated text', () => {
+  it('should return results when entry text contains hyphens', () => {
+    const db = createDatabase(':memory:');
+
+    upsertEntry(
+      db,
+      makeEntry({
+        id: 'hyp00001',
+        text: 'fi-abakus server runs PostNord integration',
+        area: 'postnord',
+      }),
+    );
+    upsertEntry(
+      db,
+      makeEntry({
+        id: 'hyp00002',
+        text: 'PLANDENT-004 decision about database migration',
+        area: 'plandent',
+      }),
+    );
+
+    const results1 = searchEntries(db, 'fi-abakus');
+    expect(results1).toHaveLength(1);
+    expect(results1[0].id).toBe('hyp00001');
+
+    const results2 = searchEntries(db, 'PLANDENT-004');
+    expect(results2).toHaveLength(1);
+    expect(results2[0].id).toBe('hyp00002');
 
     db.close();
   });

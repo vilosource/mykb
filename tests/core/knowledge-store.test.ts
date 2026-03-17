@@ -317,6 +317,24 @@ describe('MykbStore', () => {
     });
   });
 
+  describe('matchAreas with hyphenated text', () => {
+    it('returns matching areas when query contains hyphens', async () => {
+      await withTempBrain(async (brainPath) => {
+        fs.mkdirSync(path.join(brainPath, 'areas'), { recursive: true });
+        const store = MykbStore.open(brainPath);
+
+        store.addFact('postnord', 'fi-abakus server runs the warehouse integration');
+        store.addFact('plandent', 'PLANDENT-004 decided on Spring 5 migration target');
+
+        const matches = store.matchAreas('fi-abakus');
+        expect(matches.length).toBeGreaterThanOrEqual(1);
+        expect(matches[0].area).toBe('postnord');
+
+        store.close();
+      });
+    });
+  });
+
   describe('compact', () => {
     it('compacts JSONL files for a specific area', async () => {
       await withTempBrain(async (brainPath) => {
