@@ -22,6 +22,8 @@
   "scripts": {
     "build": "tsc",
     "bundle": "npx esbuild src/extension/index.ts --bundle --platform=node --format=esm --outfile=dist/bundle/index.js --external:better-sqlite3 --target=esnext --legal-comments=none",
+    "bundle:cli": "node scripts/bundle-cli.mjs",
+    "bundle:all": "npm run bundle && npm run bundle:cli",
     "test": "vitest run",
     "lint": "eslint . && prettier --check .",
     "clean": "rm -rf dist coverage"
