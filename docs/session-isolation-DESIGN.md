@@ -52,11 +52,13 @@ not as the primary isolation mechanism.
 
 Each launch function generates a **unique session ID** (UUID) at startup and passes
 it into the runtime as the `KB_SESSION_ID` environment variable. mykb uses this ID
-to derive a **per-session state file** in `/tmp/`.
+to derive a **per-session state file** in the OS temp directory.
 
 ```
-/tmp/.mykb-session-<KB_SESSION_ID>
+<tmpdir>/.mykb-session-<KB_SESSION_ID>
 ```
+
+Where `<tmpdir>` is `os.tmpdir()` in TypeScript / `/tmp` on Linux.
 
 This file contains only the active workspace ID for that session. It is:
 - **Per-process**: generated fresh on each alias invocation
@@ -181,6 +183,17 @@ MYKB_WORKSPACE=plandent kb work journal "deployed to staging"
 
 ### 1. mykb — `src/core/workspace.ts`
 
+Add a private helper for session file path:
+```typescript
+import os from 'node:os';
+
+private sessionFile(): string | null {
+  const sessionId = process.env.KB_SESSION_ID?.trim();
+  if (!sessionId) return null;
+  return path.join(os.tmpdir(), `.mykb-session-${sessionId}`);
+}
+```
+
 `getActiveWorkspaceId()`:
 ```typescript
 getActiveWorkspaceId(): string | null {
@@ -189,11 +202,10 @@ getActiveWorkspaceId(): string | null {
   if (explicit?.trim()) return explicit.trim();
 
   // Tier 2: per-session isolation
-  const sessionId = process.env.KB_SESSION_ID;
-  if (sessionId?.trim()) {
-    const sessionFile = `/tmp/.mykb-session-${sessionId.trim()}`;
-    if (fs.existsSync(sessionFile)) {
-      return fs.readFileSync(sessionFile, 'utf-8').trim() || null;
+  const sf = this.sessionFile();
+  if (sf) {
+    if (fs.existsSync(sf)) {
+      return fs.readFileSync(sf, 'utf-8').trim() || null;
     }
     return null; // session active but no workspace set yet
   }
@@ -208,9 +220,9 @@ getActiveWorkspaceId(): string | null {
 `setActiveWorkspaceId(id)`:
 ```typescript
 setActiveWorkspaceId(id: string): void {
-  const sessionId = process.env.KB_SESSION_ID?.trim();
-  if (sessionId) {
-    fs.writeFileSync(`/tmp/.mykb-session-${sessionId}`, id + '\n');
+  const sf = this.sessionFile();
+  if (sf) {
+    fs.writeFileSync(sf, id + '\n');
     return;
   }
   this.ensureDir(this.workspacesDir);
@@ -221,10 +233,9 @@ setActiveWorkspaceId(id: string): void {
 `clearActiveWorkspaceId()`:
 ```typescript
 clearActiveWorkspaceId(): void {
-  const sessionId = process.env.KB_SESSION_ID?.trim();
-  if (sessionId) {
-    const sessionFile = `/tmp/.mykb-session-${sessionId}`;
-    if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
+  const sf = this.sessionFile();
+  if (sf) {
+    if (fs.existsSync(sf)) fs.unlinkSync(sf);
     return;
   }
   const file = this.activeFile();
@@ -242,8 +253,7 @@ passes ad-hoc env vars directly into the container.
 Affected files:
 - `cmd/run.go` — add `--env` flag, parse into `[]domain.EnvVar`
 - `cmd/session.go` — same
-- `internal/orchestrator/run.go` — accept and merge ad-hoc env vars into `allEnvVars`
-- `internal/domain/types.go` — add `AdHocEnvVars []EnvVar` to `RunOpts`
+- `internal/orchestrator/run.go` — add `AdHocEnvVars` to `RunOpts`, merge into `allEnvVars`
 
 ### 3. bashrc — Replace existing aliases
 

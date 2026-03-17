@@ -18,22 +18,29 @@ encapsulated behind `FileSystemWorkspaceStorage` (Guardrail 4).
 
 ### Step 1.1 — RED: Tests for session-isolated workspace tracking
 
-Add to `src/core/workspace.test.ts` (or equivalent test file):
+Add to `tests/core/workspace.test.ts` (existing file):
 
 ```
 - getActiveWorkspaceId() with KB_SESSION_ID set + session file exists → returns file content
 - getActiveWorkspaceId() with KB_SESSION_ID set + no session file → returns null
 - getActiveWorkspaceId() with KB_SESSION_ID not set + .active exists → returns .active content
 - getActiveWorkspaceId() with MYKB_WORKSPACE set → returns env var value (ignores session file and .active)
-- setActiveWorkspaceId() with KB_SESSION_ID set → writes to /tmp/.mykb-session-<id>
+- getActiveWorkspaceId() with MYKB_WORKSPACE + KB_SESSION_ID both set → MYKB_WORKSPACE wins
+- setActiveWorkspaceId() with KB_SESSION_ID set → writes to session file, .active unchanged
 - setActiveWorkspaceId() with KB_SESSION_ID not set → writes to .active
-- clearActiveWorkspaceId() with KB_SESSION_ID set → removes session file
+- clearActiveWorkspaceId() with KB_SESSION_ID set → removes session file, .active unchanged
 - clearActiveWorkspaceId() with KB_SESSION_ID not set → removes .active
 ```
 
-Test isolation: set/unset `process.env.KB_SESSION_ID` and `process.env.MYKB_WORKSPACE`
-in `beforeEach`/`afterEach`. Use a random suffix for the session file path to avoid
-test-to-test collision (`/tmp/.mykb-session-test-<randomId>`).
+**Env var hygiene:** Each test must save and restore `process.env.KB_SESSION_ID` and
+`process.env.MYKB_WORKSPACE` to avoid cross-test pollution. The existing
+`withTempBrain` helper saves/restores `MYKB_DIR` but not these two. Use a
+`beforeEach`/`afterEach` block in the new `describe` section, or inline
+save/restore per test.
+
+**Session file paths:** Use `os.tmpdir()` in the implementation (not hardcoded
+`/tmp/`) for cross-platform safety. In tests, each test gets isolation via unique
+`KB_SESSION_ID` values (e.g. `test-${randomUUID()}`).
 
 Commit: `test: KB_SESSION_ID session isolation for workspace tracking`
 
@@ -47,15 +54,33 @@ Update three methods in `FileSystemWorkspaceStorage`:
 
 **`clearActiveWorkspaceId()`** — removes session file when `KB_SESSION_ID` set, else `.active`
 
-See `session-isolation-DESIGN.md` for the exact TypeScript implementations.
+Use `os.tmpdir()` for the session file base path:
+```typescript
+import os from 'node:os';
+
+private sessionFile(): string | null {
+  const sessionId = process.env.KB_SESSION_ID?.trim();
+  if (!sessionId) return null;
+  return path.join(os.tmpdir(), `.mykb-session-${sessionId}`);
+}
+```
+
+See `session-isolation-DESIGN.md` for the full method implementations.
+
+**Edge case — `MYKB_WORKSPACE` + `kb work start`:** When `MYKB_WORKSPACE` is set,
+`getActiveWorkspaceId()` always returns it, but `setActiveWorkspaceId()` still
+writes to the session file or `.active`. This means `kb work start X` succeeds
+but `kb work show` still returns `MYKB_WORKSPACE`. This is acceptable: `MYKB_WORKSPACE`
+is an explicit override for scripted use and should not be combined with interactive
+`kb work start`. No warning needed in v1.
 
 Commit: `feat: KB_SESSION_ID session isolation for workspace tracking`
 
-### Step 1.3 — Verify
+### Step 1.3 — Build and verify
 
 ```bash
-make test        # all existing tests still pass
-make test-race   # if available
+npm run build    # rebuild CLI bundle
+npm test         # all existing + new tests pass
 ```
 
 Manual smoke test:
@@ -74,34 +99,47 @@ Commit: none — verification only.
 
 ## Phase 2: vf-agents — `--env` Flag on `vfa run`
 
-**Scope:** `cmd/run.go`, `cmd/session.go`, `internal/domain/types.go`,
-`internal/orchestrator/run.go`
+**Scope:** `cmd/run.go`, `cmd/session.go`, `internal/orchestrator/run.go`
+
+Note: `RunOpts` is defined in `internal/orchestrator/run.go`, not `domain/types.go`.
 
 ### Step 2.1 — RED: Tests for `--env` flag parsing and propagation
 
-Add to `cmd/run_test.go` (or orchestrator integration tests):
+Add to orchestrator tests (`internal/orchestrator/run_test.go`):
 
 ```
-- --env KEY=VALUE parsed into RunOpts.AdHocEnvVars
-- --env KEY=VALUE multiple times → all collected
-- --env without VALUE (malformed) → error
-- AdHocEnvVars merged into allEnvVars in orchestrator
-- AdHocEnvVars appear in ExecOpts.EnvVars passed to executor
+- RunOpts.AdHocEnvVars merged into ExecOpts.EnvVars passed to executor
+- Multiple AdHocEnvVars all appear in container env
+- Empty AdHocEnvVars → no effect on existing env vars
+```
+
+Add to CLI-level tests if applicable:
+```
+- --env KEY=VALUE parsed correctly
+- --env KEY=VALUE repeatable (multiple flags)
+- --env without = separator → error
 ```
 
 Commit: `test: --env flag for ad-hoc env var injection`
 
-### Step 2.2 — GREEN: Add `AdHocEnvVars` to `RunOpts`
+### Step 2.2 — GREEN: Implement `--env` flag end-to-end
 
-In `internal/domain/types.go`, add to `RunOpts`:
+All changes in one commit — they form a single atomic feature:
+
+**`internal/orchestrator/run.go`** — add `AdHocEnvVars` to `RunOpts`:
 ```go
-AdHocEnvVars []EnvVar
+type RunOpts struct {
+    // ... existing fields ...
+    AdHocEnvVars []domain.EnvVar
+}
 ```
 
-Commit: `feat: add AdHocEnvVars to RunOpts`
+Merge in the orchestrator, after profile env vars:
+```go
+allEnvVars = append(allEnvVars, opts.AdHocEnvVars...)
+```
 
-### Step 2.3 — GREEN: Parse `--env` in `cmd/run.go`
-
+**`cmd/run.go`** — parse `--env` flag:
 ```go
 envFlags, _ := cmd.Flags().GetStringArray("env")
 var adHocEnvVars []domain.EnvVar
@@ -112,7 +150,6 @@ for _, e := range envFlags {
     }
     adHocEnvVars = append(adHocEnvVars, domain.EnvVar{Name: parts[0], Value: parts[1]})
 }
-// pass into RunOpts.AdHocEnvVars
 ```
 
 Add flag definition:
@@ -120,23 +157,15 @@ Add flag definition:
 runCmd.Flags().StringArray("env", nil, "Set env var in container: KEY=VALUE (repeatable)")
 ```
 
-Apply the same change to `cmd/session.go` for `vfa session start`.
+**`cmd/session.go`** — same `--env` flag on `vfa session start`.
 
-Commit: `feat: --env flag for ad-hoc env var injection in run and session`
+Commit: `feat: --env flag for ad-hoc env var injection`
 
-### Step 2.4 — GREEN: Merge in orchestrator
-
-In `internal/orchestrator/run.go`, after building `allEnvVars`:
-```go
-allEnvVars = append(allEnvVars, opts.AdHocEnvVars...)
-```
-
-Commit: `feat: merge AdHocEnvVars into container env in orchestrator`
-
-### Step 2.5 — Verify
+### Step 2.3 — Verify
 
 ```bash
-make test-race
+make test-race   # all tests pass
+make install     # install updated vfa binary
 ```
 
 Manual smoke test:
@@ -197,13 +226,18 @@ kb-cclaude() {
 }
 ```
 
+**Note on workdir handling:** Host functions (`kb-pi`, `kb-claude`) pass `"$@"`
+directly to the runtime — the user `cd`s to the project directory before launching.
+Containerized functions (`kb-cpi`, `kb-cclaude`) take an explicit workdir argument
+(`${1:-.}`) because vf-agents needs to bind-mount it. This is intentionally different.
+
 ### Step 3.3 — Reload and verify
 
 ```bash
 source ~/.bashrc
 
 # Test host Pi session
-kb-pi --version   # should launch Pi with KB_SESSION_ID in env
+kb-pi    # should launch Pi with KB_SESSION_ID in env
 
 # Test containerized Pi
 kb-cpi ~/GitHub/mykb
@@ -233,7 +267,7 @@ kb-cpi ~/GitHub/mykb
 | Phase | Commits |
 |---|---|
 | mykb P1 | `test: KB_SESSION_ID session isolation` → `feat: KB_SESSION_ID session isolation` |
-| vf-agents P2 | `test: --env flag` → `feat: AdHocEnvVars to RunOpts` → `feat: --env flag in run and session` → `feat: merge AdHocEnvVars in orchestrator` |
+| vf-agents P2 | `test: --env flag for ad-hoc env var injection` → `feat: --env flag for ad-hoc env var injection` |
 | bashrc P3 | Manual edit + `source ~/.bashrc` (no commit needed) |
 
 ---
