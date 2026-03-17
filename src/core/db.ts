@@ -271,10 +271,18 @@ export function queryEntries(db: Database.Database, filter: EntryFilter): Knowle
   return rows.map(rowToEntry);
 }
 
+export function sanitizeFtsQuery(query: string): string {
+  const tokens = query.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return '';
+  return tokens.map((t) => `"${t}"`).join(' ');
+}
+
 export function searchEntries(db: Database.Database, query: string): KnowledgeEntry[] {
+  const sanitized = sanitizeFtsQuery(query);
+  if (!sanitized) return [];
   const ftsRows = db
     .prepare(`SELECT id, rank FROM entries_fts WHERE entries_fts MATCH @query ORDER BY rank`)
-    .all({ query }) as FtsMatchRow[];
+    .all({ query: sanitized }) as FtsMatchRow[];
 
   if (ftsRows.length === 0) return [];
 

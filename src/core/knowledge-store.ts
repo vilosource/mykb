@@ -6,6 +6,7 @@ import {
   deleteEntry as dbDelete,
   queryEntries,
   searchEntries,
+  sanitizeFtsQuery,
 } from './db.js';
 import { appendEntry, writeTombstone, compactEntries } from './store.js';
 import { ensureFresh } from './hydrate.js';
@@ -130,9 +131,11 @@ export class MykbStore implements KnowledgeStore {
   }
 
   matchAreas(text: string): { area: string; score: number }[] {
+    const sanitized = sanitizeFtsQuery(text);
+    if (!sanitized) return [];
     const ftsRows = this.db
       .prepare(`SELECT area, rank FROM entries_fts WHERE entries_fts MATCH @query ORDER BY rank`)
-      .all({ query: text }) as FtsAreaRow[];
+      .all({ query: sanitized }) as FtsAreaRow[];
 
     // Group by area, take best (most negative) rank per area
     const areaScores = new Map<string, number>();
