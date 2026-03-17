@@ -24,19 +24,16 @@ Add to `tests/core/workspace.test.ts` (existing file):
 - getActiveWorkspaceId() with KB_SESSION_ID set + session file exists → returns file content
 - getActiveWorkspaceId() with KB_SESSION_ID set + no session file → returns null
 - getActiveWorkspaceId() with KB_SESSION_ID not set + .active exists → returns .active content
-- getActiveWorkspaceId() with MYKB_WORKSPACE set → returns env var value (ignores session file and .active)
-- getActiveWorkspaceId() with MYKB_WORKSPACE + KB_SESSION_ID both set → MYKB_WORKSPACE wins
 - setActiveWorkspaceId() with KB_SESSION_ID set → writes to session file, .active unchanged
 - setActiveWorkspaceId() with KB_SESSION_ID not set → writes to .active
 - clearActiveWorkspaceId() with KB_SESSION_ID set → removes session file, .active unchanged
 - clearActiveWorkspaceId() with KB_SESSION_ID not set → removes .active
 ```
 
-**Env var hygiene:** Each test must save and restore `process.env.KB_SESSION_ID` and
-`process.env.MYKB_WORKSPACE` to avoid cross-test pollution. The existing
-`withTempBrain` helper saves/restores `MYKB_DIR` but not these two. Use a
-`beforeEach`/`afterEach` block in the new `describe` section, or inline
-save/restore per test.
+**Env var hygiene:** Each test must save and restore `process.env.KB_SESSION_ID`
+to avoid cross-test pollution. The existing `withTempBrain` helper saves/restores
+`MYKB_DIR` but not `KB_SESSION_ID`. Use a `beforeEach`/`afterEach` block in the
+new `describe` section, or inline save/restore per test.
 
 **Session file paths:** Use `os.tmpdir()` in the implementation (not hardcoded
 `/tmp/`) for cross-platform safety. In tests, each test gets isolation via unique
@@ -48,7 +45,7 @@ Commit: `test: KB_SESSION_ID session isolation for workspace tracking`
 
 Update three methods in `FileSystemWorkspaceStorage`:
 
-**`getActiveWorkspaceId()`** — priority chain: `MYKB_WORKSPACE` → session file → `.active`
+**`getActiveWorkspaceId()`** — priority chain: session file → `.active`
 
 **`setActiveWorkspaceId(id)`** — writes session file when `KB_SESSION_ID` set, else `.active`
 
@@ -66,13 +63,6 @@ private sessionFile(): string | null {
 ```
 
 See `session-isolation-DESIGN.md` for the full method implementations.
-
-**Edge case — `MYKB_WORKSPACE` + `kb work start`:** When `MYKB_WORKSPACE` is set,
-`getActiveWorkspaceId()` always returns it, but `setActiveWorkspaceId()` still
-writes to the session file or `.active`. This means `kb work start X` succeeds
-but `kb work show` still returns `MYKB_WORKSPACE`. This is acceptable: `MYKB_WORKSPACE`
-is an explicit override for scripted use and should not be combined with interactive
-`kb work start`. No warning needed in v1.
 
 Commit: `feat: KB_SESSION_ID session isolation for workspace tracking`
 
@@ -257,7 +247,6 @@ kb-cpi ~/GitHub/mykb
 - [ ] `kb-cpi` + `kb-pi` simultaneously: container workspace does not affect host
 - [ ] Two simultaneous `kb-cpi` sessions: each container has its own workspace
 - [ ] Plain `kb work start` on host (no alias): still writes `.active`, works as before
-- [ ] `MYKB_WORKSPACE=x kb work show`: returns `x` regardless of session or `.active`
 - [ ] `kb-cclaude` session: `KB_SESSION_ID` present in container env
 
 ---

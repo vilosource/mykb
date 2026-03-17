@@ -31,22 +31,18 @@ In all four cases, the brain at `~/.mykb` is accessed — either directly on the
 or via a bind mount (`~/.mykb → /home/node/.mykb`) in the container. Multiple
 simultaneous sessions share the same brain directory, hence the same `.active` file.
 
-### Why a Simple `MYKB_WORKSPACE` Env Var Isn't Enough
+### Why the Workspace Can't Be Set at Launch Time
 
-An obvious first fix: inject `MYKB_WORKSPACE=<id>` at launch time and have
-`getActiveWorkspaceId()` check it before `.active`. This works if the workspace is
-known at launch time.
-
-But the actual usage pattern is:
+The actual usage pattern is:
 
 1. Launch `kb-pi` or `kb-claude` — no workspace selected yet
-2. Pi/Claude runs `kb work start plandent` interactively during the session
+2. The LLM agent runs `kb work start plandent` interactively during the session
 3. The workspace is now set for this session
 
-`kb work start` calls `setActiveWorkspaceId()` which writes `.active`. A static env
-var set at launch can't be updated by a child process (`kb`) to affect its parent
-shell or sibling processes. The env var approach only works as an explicit override,
-not as the primary isolation mechanism.
+The user doesn't choose the workspace before launching — the agent sets it after
+startup. This means we can't inject a workspace ID at launch time. What we need is
+an **isolated storage slot** per session, so that when the agent runs `kb work start`,
+it writes to a location that only this session reads from.
 
 ## Solution: `KB_SESSION_ID`
 
@@ -66,27 +62,41 @@ This file contains only the active workspace ID for that session. It is:
 - **Isolated**: unique ID means zero collision between concurrent sessions
 - **Uniform**: identical mechanism for host and containerized launches
 
-## Priority Chain in `getActiveWorkspaceId()`
+## Priority Chain
+
+### `getActiveWorkspaceId()`
 
 ```
-1. MYKB_WORKSPACE env var
-   └─ Explicit override. For scripted/one-shot use where the workspace
-      is known at call time. Highest priority, bypasses all files.
-
-2. /tmp/.mykb-session-<KB_SESSION_ID>
-   └─ Per-session isolation. Set by kb work start during the session.
+1. Session file: <tmpdir>/.mykb-session-<KB_SESSION_ID>
+   └─ Per-session isolation. Written by `kb work start` during the session.
       Used when KB_SESSION_ID is in the environment.
+      Returns null if session file doesn't exist yet (agent hasn't set workspace).
 
-3. ~/.mykb/workspaces/.active
-   └─ Global fallback. Used when neither env var above is set.
+2. Global file: ~/.mykb/workspaces/.active
+   └─ Fallback. Used when KB_SESSION_ID is not set.
       Single-instance CLI use on the host, no alias involved.
 ```
 
-`setActiveWorkspaceId(id)` mirrors this: writes to the session file when
-`KB_SESSION_ID` is set, otherwise writes to `.active`.
+### `setActiveWorkspaceId(id)`
 
-`clearActiveWorkspaceId()` mirrors this too: removes the session file when
-`KB_SESSION_ID` is set, otherwise removes `.active`.
+- `KB_SESSION_ID` set → writes to session file only (never touches `.active`)
+- `KB_SESSION_ID` not set → writes to `.active` as today
+
+### `clearActiveWorkspaceId()`
+
+- `KB_SESSION_ID` set → removes session file (never touches `.active`)
+- `KB_SESSION_ID` not set → removes `.active` as today
+
+## Agent Flow
+
+When a session launches with `KB_SESSION_ID`:
+
+1. Agent starts, runs `kb work show` → no session file yet → returns null
+2. Agent sees no active workspace, asks the user which workspace to use
+3. User says "plandent"
+4. Agent runs `kb work start plandent` → writes to session file
+5. All subsequent `kb work show`, `kb work journal`, etc. read from session file
+6. Fully isolated — no other session can see or modify this session's workspace
 
 ## Shell Functions
 
@@ -138,11 +148,13 @@ of that process. For containerized launches, it is passed into the container via
 ```
 Terminal 1: kb-pi ~/GitHub/plandent
   → KB_SESSION_ID=a1b2c3d4
-  → kb work start plandent → writes /tmp/.mykb-session-a1b2c3d4
+  → agent asks: "Which workspace?" → user: "plandent"
+  → agent runs: kb work start plandent → writes /tmp/.mykb-session-a1b2c3d4
 
 Terminal 2: kb-pi ~/GitHub/mykb
   → KB_SESSION_ID=e5f6g7h8
-  → kb work start mykb → writes /tmp/.mykb-session-e5f6g7h8
+  → agent asks: "Which workspace?" → user: "mykb"
+  → agent runs: kb work start mykb → writes /tmp/.mykb-session-e5f6g7h8
 
 Terminal 1: kb work journal "..."  → reads /tmp/.mykb-session-a1b2c3d4 = "plandent" ✓
 Terminal 2: kb work journal "..."  → reads /tmp/.mykb-session-e5f6g7h8 = "mykb"     ✓
@@ -153,12 +165,12 @@ Terminal 2: kb work journal "..."  → reads /tmp/.mykb-session-e5f6g7h8 = "mykb
 ```
 Host:      kb-claude ~/GitHub/stark
   → KB_SESSION_ID=aaaa1111
-  → kb work start stark → writes /tmp/.mykb-session-aaaa1111
+  → agent runs: kb work start stark → writes /tmp/.mykb-session-aaaa1111
 
 Container: kb-cpi ~/GitHub/plandent
   → KB_SESSION_ID=bbbb2222 (injected into container env)
   → Container /tmp/ is separate from host /tmp/
-  → kb work start plandent → writes /tmp/.mykb-session-bbbb2222 (inside container)
+  → agent runs: kb work start plandent → writes /tmp/.mykb-session-bbbb2222
 
 No conflict. ✓
 ```
@@ -170,13 +182,6 @@ $ kb work start mykb
   → KB_SESSION_ID not set
   → falls through to ~/.mykb/workspaces/.active
   → writes "mykb" to .active as today ✓
-```
-
-### Scripted one-shot use
-
-```bash
-MYKB_WORKSPACE=plandent kb work journal "deployed to staging"
-  → MYKB_WORKSPACE set → used directly, no file read ✓
 ```
 
 ## Changes Required
@@ -197,11 +202,7 @@ private sessionFile(): string | null {
 `getActiveWorkspaceId()`:
 ```typescript
 getActiveWorkspaceId(): string | null {
-  // Tier 1: explicit override
-  const explicit = process.env.MYKB_WORKSPACE;
-  if (explicit?.trim()) return explicit.trim();
-
-  // Tier 2: per-session isolation
+  // Tier 1: per-session isolation
   const sf = this.sessionFile();
   if (sf) {
     if (fs.existsSync(sf)) {
@@ -210,7 +211,7 @@ getActiveWorkspaceId(): string | null {
     return null; // session active but no workspace set yet
   }
 
-  // Tier 3: global fallback
+  // Tier 2: global fallback
   const file = this.activeFile();
   if (!fs.existsSync(file)) return null;
   return fs.readFileSync(file, 'utf-8').trim() || null;
@@ -265,7 +266,6 @@ The existing `kb-claude` and `kb-pi` (containerized) become `kb-cclaude` and
 
 - Plain `kb` CLI on the host: unaffected — `KB_SESSION_ID` not set, `.active` used
 - Existing `kb-claude` / `kb-pi` aliases: replaced, not silently broken
-- `MYKB_WORKSPACE` override: still works, highest priority
 - Brain git history, `workspace.json`, `journal.jsonl`: untouched
 
 ## Non-Goals
