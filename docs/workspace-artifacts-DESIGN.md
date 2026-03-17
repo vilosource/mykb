@@ -82,39 +82,20 @@ Example system prompt inclusion:
 
 ## Active Workspace Resolution
 
-### Current Implementation (Gap)
+The active workspace is stored in `~/.mykb/workspaces/.active` — a plain text file
+containing the workspace ID. `kb work start <id>` writes to it; all workspace-scoped
+commands read from it.
 
-The active workspace is stored in `~/.mykb/workspaces/.active` — a plain text file containing the workspace ID. `kb work start <id>` writes to it; all workspace-scoped commands read from it.
+Multiple simultaneous sessions sharing the same brain corrupt each other's workspace
+targeting silently. This affects all workspace-scoped commands, not just `kb wsa`,
+and is a pre-existing gap that `kb wsa` makes more acute.
 
-### The Multi-Instance Problem
+**The fix is documented separately:** see [`session-isolation-DESIGN.md`](session-isolation-DESIGN.md).
 
-This is **global state**. With multiple simultaneous Claude Code or Pi instances:
-
-- Instance 1: `kb work start mykb` → writes `"mykb"` to `.active`
-- Instance 2: `kb work start budgetsport` → writes `"budgetsport"` to `.active`
-- Instance 1 now silently operates on `budgetsport` — journal entries, artifact adds, state updates all go to the wrong workspace
-
-This affects all workspace-scoped commands, not just `kb wsa`. It is a pre-existing gap that `kb wsa` makes more acute.
-
-### Proposed Fix: `MYKB_WORKSPACE` Environment Variable
-
-Priority order for resolving the active workspace:
-
-1. `MYKB_WORKSPACE` environment variable (per-process, per-session)
-2. `~/.mykb/workspaces/.active` file (global fallback, single-instance use)
-3. Error — no active workspace
-
-**Single-instance CLI use:** `kb work start <id>` continues to work exactly as today. The `.active` file is fine when only one instance is running.
-
-**Multi-instance use (vfa/Pi containers):** Inject `MYKB_WORKSPACE=<id>` at container launch. Each container has its own env, so each instance operates independently with no coordination needed.
-
-```bash
-# In vfa profile or Pi launch config:
-MYKB_WORKSPACE=budgetsport kb wsa add design.md   # always targets budgetsport
-MYKB_WORKSPACE=mykb kb work journal "..."          # always targets mykb
-```
-
-This fix is backward-compatible — existing single-instance workflows are unaffected.
+The solution uses a `KB_SESSION_ID` env var generated at launch time by the shell
+functions (`kb-pi`, `kb-claude`, `kb-cpi`, `kb-cclaude`). mykb derives a
+per-session state file `/tmp/.mykb-session-<id>` from it, providing isolation
+without touching the global `.active` file.
 
 ## Open Questions
 
