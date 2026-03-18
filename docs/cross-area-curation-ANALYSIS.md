@@ -220,6 +220,67 @@ Since every customer project needs an "environment access" pattern, provide a te
 
 ---
 
+## The Missing Dimension: Retrieval-Optimized Curation
+
+The curation work above optimized for **knowledge quality** — reducing sprawl, archiving stale entries, consolidating fragments. But the original incident wasn't a quality problem — the correct information *existed* and was *loaded*. The AI couldn't **find and trust** it among the noise.
+
+Quality curation and retrieval optimization are different objectives:
+
+| Objective | What it optimizes | Example |
+|-----------|------------------|---------|
+| Quality curation | Knowledge is accurate, non-redundant, well-typed | Consolidate 5 SSH facts into 1 pattern |
+| Retrieval optimization | The right entry surfaces when the AI needs it | When the AI is about to SSH, the access pattern is the first thing it sees |
+
+The curation agents reduced entry counts by 40-50% — but a curated area with 14 flat bullets is still a flat list. The AI still scans linearly. The critical question is: **does the curation make retrieval more likely to succeed?**
+
+### Where curation helps retrieval
+
+1. **Fewer entries = less noise.** 14 entries is easier to scan than 32. Probability of finding the right entry increases.
+2. **Patterns are self-contained.** The AI doesn't need to mentally join 5 facts — one pattern has everything.
+3. **No conflicting values.** After consolidation, there's one hostname, not two competing ones.
+
+### Where curation does NOT help retrieval
+
+1. **Ordering is unchanged.** Entries are still ordered by ID (creation time). The new patterns we created get high IDs — they appear LAST in the list.
+2. **Type information is invisible.** We carefully used the `pattern` type, but the renderer doesn't show types. Our patterns render identically to facts.
+3. **Tags aren't used for matching.** We added tags like `#ssh` and `#access` to the server access pattern, but the Tier 2 scorer matches against area summaries, not entry tags.
+4. **The zone filter bug means archived entries still appear.** Until this is fixed, all curation is invisible to the AI.
+
+### A retrieval-optimized curation protocol
+
+The 10-point checklist should be extended with 4 retrieval-specific checks:
+
+11. **Scanability:** Is the actionable value (FQDN, IP, command) at the START of the entry text, or buried in a long sentence? The AI reads left-to-right; front-load the critical value.
+12. **Search relevance:** Would the entry be found by likely search terms? If someone searches "SSH dev server", does FTS5 match this entry? Add keywords that match how the information would be searched for, not just how it was recorded.
+13. **Scoring alignment:** Are the entry's tags aligned with the signals the scorer collects? If the user's intent will produce the signal "ssh" or "server", does this entry have tags that match?
+14. **Conflict resolution:** After consolidation, is there exactly ONE authoritative entry for each operational topic? No remaining entries that could provide a competing (wrong) answer?
+
+### Concrete example: the stark-picking server access pattern
+
+**What we created:**
+```
+Stark server access: Dev: ansible@stark-pda-1.dev.optiscangroup.com (ProxyJump vpn-egress-1, key ~/.ssh/stark-pda-2026)...
+```
+
+**Retrieval assessment:**
+- Scanability: The FQDN appears 30 characters into the text, after "Dev: ansible@". The AI scanning for a hostname would find it, but "Stark server access:" is the first thing seen — that's good, it immediately signals what this entry is about.
+- Search relevance: Contains "ssh", "server", "access", "dev", "ansible", "stark" — matches many likely queries.
+- Scoring alignment: Tagged `#ssh #access #networking` — good match for connection-related signals.
+- Conflict resolution: The 5 original entries (including the wrong short hostname) are archived. Only this pattern exists as active. **But the zone filter bug means the archived entries still appear in context.**
+
+**The zone filter bug is the single biggest retrieval problem.** Until it's fixed, all curation work is undermined.
+
+### Recommendation: Curation must optimize for retrieval, not just tidiness
+
+The Curator should not just consolidate and archive — it should verify that the curated knowledge is **retrievable**. After every curation action, the Curator should:
+
+1. Verify the new/updated entry would be found by FTS5 for likely queries
+2. Verify no competing (archived) entries would still surface (requires zone filter fix)
+3. Verify the actionable value is front-loaded in the entry text
+4. Verify the entry's tags match the scoring system's signal vocabulary
+
+---
+
 ## Impact on Curator Design
 
 This cross-area curation exercise validates the Curator research direction with empirical data:
