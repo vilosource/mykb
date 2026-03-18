@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ToolResult } from '../extension/pi-types.js';
 import type { MykbStore } from '../core/knowledge-store.js';
 import type { EntryType } from '../core/types.js';
-import { ProvenanceStatus } from '../core/types.js';
+import { ProvenanceStatus, Zone } from '../core/types.js';
 
 type KbAddParams = {
   area: string;
@@ -56,7 +56,7 @@ export async function executeKbAdd(store: MykbStore, params: KbAddParams): Promi
       };
   }
 
-  const entries = store.loadArea(area);
+  const entries = store.loadArea(area, { excludeZone: Zone.Archive });
   const count = entries.length;
 
   return {

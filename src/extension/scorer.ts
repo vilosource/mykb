@@ -1,4 +1,4 @@
-import type { AreaMetadata, KnowledgeEntry } from '../core/types.js';
+import { type AreaMetadata, type KnowledgeEntry, Zone } from '../core/types.js';
 import type { MykbStore } from '../core/knowledge-store.js';
 import type { Signal } from './state.js';
 
@@ -154,7 +154,7 @@ export function selectEntriesForInjection(
   for (const { area } of boosted) {
     if (tokensUsed >= tokenBudget) break;
 
-    const entries = store.loadArea(area);
+    const entries = store.loadArea(area, { excludeZone: Zone.Archive });
     if (entries.length === 0) continue;
 
     const areaEntries: KnowledgeEntry[] = [];

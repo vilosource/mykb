@@ -126,8 +126,8 @@ export class MykbStore implements KnowledgeStore {
     return queryEntries(this.db, { area, ...filter });
   }
 
-  search(query: string): KnowledgeEntry[] {
-    return searchEntries(this.db, query);
+  search(query: string, excludeZone?: Zone): KnowledgeEntry[] {
+    return searchEntries(this.db, query, excludeZone);
   }
 
   matchAreas(text: string): { area: string; score: number }[] {

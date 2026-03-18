@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ToolResult } from '../extension/pi-types.js';
 import type { MykbStore } from '../core/knowledge-store.js';
+import { Zone } from '../core/types.js';
 import { renderMarkdown } from '../core/render.js';
 
 type KbSearchParams = {
@@ -10,7 +11,7 @@ export async function executeKbSearch(
   store: MykbStore,
   params: KbSearchParams,
 ): Promise<ToolResult> {
-  const entries = store.search(params.query);
+  const entries = store.search(params.query, Zone.Archive);
 
   if (entries.length === 0) {
     return {

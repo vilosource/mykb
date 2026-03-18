@@ -1,7 +1,7 @@
 import type { CommandHandler } from '../pi-types.js';
 import type { MykbStore } from '../../core/knowledge-store.js';
 import type { SessionState } from '../state.js';
-import type { KnowledgeEntry } from '../../core/types.js';
+import { type KnowledgeEntry, Zone } from '../../core/types.js';
 import { renderMarkdown } from '../../core/render.js';
 
 type KbContext = {
@@ -30,7 +30,7 @@ export function createKbCommandHandler(store: MykbStore, state: SessionState): C
       const emptyAreas: string[] = [];
 
       for (const areaId of areaIds) {
-        const entries = store.loadArea(areaId);
+        const entries = store.loadArea(areaId, { excludeZone: Zone.Archive });
         if (entries.length === 0) {
           emptyAreas.push(areaId);
         } else {

@@ -111,7 +111,7 @@ addCmd
       if (opts.source)
         options.provenance = { status: ProvenanceStatus.Unverified, source: opts.source };
       const id = store.addFact(area, text, options);
-      const entries = store.loadArea(area);
+      const entries = store.loadArea(area, { excludeZone: Zone.Archive });
       const counts = countTypes(entries);
       console.log(`added fact ${id} to ${area} (${counts})`);
     });
@@ -149,7 +149,7 @@ addCmd
         if (opts.rejected) options.rejected = opts.rejected;
         if (opts.context) options.context = opts.context;
         const id = store.addDecision(area, text, options);
-        const entries = store.loadArea(area);
+        const entries = store.loadArea(area, { excludeZone: Zone.Archive });
         const counts = countTypes(entries);
         console.log(`added decision ${id} to ${area} (${counts})`);
       });
@@ -177,7 +177,7 @@ addCmd
           options.provenance = { status: ProvenanceStatus.Unverified, source: opts.source };
         if (opts.failed) options.failed = true;
         const id = store.addGotcha(area, text, options);
-        const entries = store.loadArea(area);
+        const entries = store.loadArea(area, { excludeZone: Zone.Archive });
         const counts = countTypes(entries);
         console.log(`added gotcha ${id} to ${area} (${counts})`);
       });
@@ -198,7 +198,7 @@ addCmd
       if (opts.source)
         options.provenance = { status: ProvenanceStatus.Unverified, source: opts.source };
       const id = store.addPattern(area, text, options);
-      const entries = store.loadArea(area);
+      const entries = store.loadArea(area, { excludeZone: Zone.Archive });
       const counts = countTypes(entries);
       console.log(`added pattern ${id} to ${area} (${counts})`);
     });
@@ -224,7 +224,7 @@ addCmd
         if (opts.source)
           options.provenance = { status: ProvenanceStatus.Unverified, source: opts.source };
         const id = store.addLink(area, text, url, options);
-        const entries = store.loadArea(area);
+        const entries = store.loadArea(area, { excludeZone: Zone.Archive });
         const counts = countTypes(entries);
         console.log(`added link ${id} to ${area} (${counts})`);
       });
@@ -236,12 +236,14 @@ program
   .command('load <area>')
   .description('Load entries from an area')
   .option('--zone <zone>', 'Filter by zone')
+  .option('--all', 'Include archived entries')
   .option('--tag <tag>', 'Filter by tag')
   .option('--json', 'Output as JSON')
-  .action((area: string, opts: { zone?: string; tag?: string; json?: boolean }) => {
+  .action((area: string, opts: { zone?: string; all?: boolean; tag?: string; json?: boolean }) => {
     withStore((store) => {
       const filter: EntryFilter = {};
       if (opts.zone) filter.zone = opts.zone as Zone;
+      else if (!opts.all) filter.excludeZone = Zone.Archive;
       if (opts.tag) filter.tags = [opts.tag];
       const entries = store.loadArea(area, filter);
       if (opts.json) {
@@ -273,9 +275,11 @@ program
 program
   .command('search <query>')
   .description('Full-text search across all areas')
-  .action((query: string) => {
+  .option('--all', 'Include archived entries')
+  .action((query: string, opts: { all?: boolean }) => {
     withStore((store) => {
-      const entries = store.search(query);
+      const excludeZone = opts.all ? undefined : Zone.Archive;
+      const entries = store.search(query, excludeZone);
       const output = renderMarkdown(entries);
       if (output) process.stdout.write(output);
     });
