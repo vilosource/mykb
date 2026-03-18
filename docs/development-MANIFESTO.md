@@ -1,5 +1,8 @@
 # mykb Development Manifesto
 
+**Version:** 2.0
+**Status:** Mandatory — all development work must follow this document
+
 These rules govern how code is written in this project. No exceptions.
 
 ---
@@ -14,23 +17,167 @@ Every feature starts with a failing test.
 
 **Rules:**
 - No implementation code without a failing test driving it
-- One commit per step: test (RED), implementation (GREEN), refactor (optional)
 - Tests describe behavior, not implementation details
 - Table-driven tests for functions with multiple input/output cases
-- Test names describe the scenario: `should return empty array when area has no facts`
+- Test names describe the scenario: `getActiveWorkspaceId with KB_SESSION_ID set + session file exists returns file content`
 
-**What to test:**
-- Core library: unit tests with in-memory SQLite and temp JSONL files
-- CLI: integration tests that invoke commands and verify output + side effects
-- Extension hooks: unit tests with mock Pi event objects
-- Scorer: unit tests with fixture data, verify area ranking
+**Commit granularity:**
+- Default: one commit per step (`test:` RED, `feat:` GREEN, `refactor:` optional)
+- Combined RED+GREEN is acceptable when the change is small and cohesive (e.g., <50 lines of implementation, tests and code tell one story). Use a single `feat:` commit.
+- Never combine across features. Each feature gets its own RED/GREEN cycle.
 
 **What NOT to test:**
 - Pi's internal behavior (it's not our code)
 - SQLite's correctness (trust the engine)
 - Third-party libraries
 
-## 2. SOLID Principles
+---
+
+## 2. Testing Pyramid
+
+Every layer has specific things it MUST verify. No layer is optional when triggered.
+
+| Layer | What it tests | Speed | Runs on |
+|-------|--------------|-------|---------|
+| **1. Unit** | Core library logic, exact assertions | ms | Every commit |
+| **2. CLI Integration** | Commands through the real CLI binary, output + side effects | seconds | Every commit |
+| **3. E2E Isolation** | Concurrent access, multi-instance state, cross-process behavior | seconds | When triggered (see rules below) |
+| **4. Behavioral** | LLM-facing output quality via string matching or LLM-as-judge | seconds | When triggered (see rules below) |
+
+Layers 1-2 are deterministic and must never be flaky. Layers 3-4 may involve real processes or LLM calls.
+
+### Layer 1: Unit Tests
+
+**Location:** `tests/core/`, `tests/extension/`, `tests/tools/`
+
+Must verify:
+- Method returns correct data for valid input
+- Method returns null or throws typed error for invalid input
+- Edge cases: empty input, null, boundary values
+- Env var save/restore in tests that modify `process.env`
+
+Must NOT rely on:
+- Real brain directory (use `withTempBrain` helper)
+- Network, Docker, or git
+
+### Layer 2: CLI Integration Tests
+
+**Location:** `tests/cli/`
+
+Must verify:
+- Command exits 0 on success, non-zero on failure
+- Output contains expected content
+- File mutations are durable: write → read back → data present
+- Cross-command round-trips: `kb work start` → `kb work show` → workspace visible
+- Error messages are actionable (tell the user what to do)
+
+**How to run:**
+```bash
+npm test                                          # all tests
+npx vitest run tests/cli/work.test.ts             # single file
+npx vitest run tests/cli/ -t "creates a workspace" # single test
+```
+
+### Layer 3: E2E Isolation Tests
+
+**Location:** `tests/cli/session-isolation.test.ts` (and similar)
+
+Must verify:
+- Concurrent access to shared state produces correct results per actor
+- One actor's operations do not corrupt another actor's state
+- Backward compatibility: absence of isolation mechanism falls back correctly
+- Cleanup: ephemeral state is removed on stop/exit
+
+**How to run:**
+```bash
+npx vitest run tests/cli/session-isolation.test.ts
+```
+
+### Layer 4: Behavioral Validation
+
+**Location:** `tests/behavioral/` (when created)
+
+For features where mykb's output is consumed by an LLM (context delivery, rendered markdown, area index), quality matters beyond structural correctness.
+
+**String matching** — when checking for specific content presence:
+```typescript
+expect(rendered).toContain('## Knowledge');
+expect(rendered).not.toContain('undefined');
+```
+
+**LLM-as-judge** — when evaluating readability, completeness, or usefulness:
+- Feed the rendered output to an LLM with evaluation criteria
+- Judge returns pass/fail with reason
+- Use for: Tier 1 area index quality, context injection completeness, rendered workspace state clarity
+
+---
+
+## 3. Change Type → Test Requirements
+
+Different changes demand different test layers. Use this table to determine which tests are mandatory.
+
+| Change type | Layer 1 (Unit) | Layer 2 (CLI) | Layer 3 (E2E Isolation) | Layer 4 (Behavioral) |
+|---|---|---|---|---|
+| Pure logic (scorer, parser, renderer) | Required | — | — | If LLM-facing output |
+| New CLI command or flag | Required | Required | — | — |
+| Shared mutable state (files read/written by multiple processes) | Required | Required | **Required** | — |
+| Data format change (JSONL schema, workspace.json) | Required | Required | — | — |
+| LLM-facing output (context delivery, area index, rendered markdown) | Required | — | — | **Required** |
+| Bug fix | Required (reproduce first) | If CLI-visible | If concurrency-related | — |
+| Cross-repo feature | Required per repo | Required per repo | **Required** (end-to-end) | — |
+
+**The rule:** If your change touches shared mutable state — any file, database, or resource that multiple processes may access simultaneously — you must write an E2E isolation test proving concurrent access is safe. Unit tests with mocked filesystems are not sufficient.
+
+---
+
+## 4. Feature Completion Checklist
+
+Before a feature is considered done, every applicable item must be checked.
+
+### Tests
+
+- [ ] Unit test for the happy path
+- [ ] Unit test for each error case
+- [ ] If the feature adds/changes a CLI command → CLI integration test (exit code, output, side effects)
+- [ ] If the feature touches shared mutable state → E2E isolation test with concurrent actors
+- [ ] If the feature changes LLM-facing output → behavioral validation (string matching or LLM-as-judge)
+- [ ] If the feature spans multiple repos → integration test in each repo, plus a cross-boundary test
+- [ ] If the feature uses env vars → tests save/restore `process.env` to prevent cross-test pollution
+- [ ] Full test suite passes: `npm test`
+
+### Code
+
+- [ ] Every public function has a test
+- [ ] No `any` types
+- [ ] Interfaces defined before implementations
+- [ ] Dependencies injected, not hardcoded
+- [ ] Error cases handled — not swallowed, not ignored
+- [ ] No dead code — if it's not called, delete it
+
+### Build
+
+- [ ] `npm run build` succeeds
+- [ ] `npm test` passes (all tests, all layers)
+
+---
+
+## 5. Anti-Patterns
+
+These are things that feel productive but cause bugs. Do not do them.
+
+| Anti-Pattern | Why It's Bad | Do This Instead |
+|---|---|---|
+| Write code first, add tests after | Tests verify the implementation, not the requirement. They pass by construction and miss edge cases. | RED → GREEN → REFACTOR. Always. |
+| Unit test shared mutable state with mocks only | Mocks prove method logic, not concurrent behavior. Two tests passing independently doesn't prove two processes won't corrupt each other. | Unit tests for logic AND E2E tests with concurrent actors through the real CLI. |
+| Test the method but not the CLI path | A method that works in isolation may not be wired correctly. The CLI may parse args wrong, pass the wrong env, or skip the method entirely. | Layer 2 CLI integration tests for every user-facing behavior. |
+| Skip E2E tests because "unit tests cover it" | Unit tests for `getActiveWorkspaceId()` passed. But the actual bug — two sessions clobbering `.active` — only manifests when two CLI processes run concurrently. Unit tests can't catch this. | Write E2E tests for the scenario the feature is designed to handle. |
+| Modify `process.env` without save/restore | Test A sets `KB_SESSION_ID`. Test B runs without it but inherits A's value. Test B passes for the wrong reason. | `beforeEach`/`afterEach` save and restore env vars. Use unique IDs (`test-${randomUUID()}`) per test. |
+| Combine RED+GREEN across features | Mixing two features in one commit makes it impossible to revert one without the other. | One RED/GREEN cycle per feature. Combined commits only within a single feature. |
+| Manifesto exists but CLAUDE.md doesn't reference it | An AI agent will never read a manifesto it doesn't know about. The rules are followed only when the human remembers to enforce them. | Reference the manifesto from CLAUDE.md so it's loaded into every session. |
+
+---
+
+## 6. SOLID Principles
 
 ### Single Responsibility (S)
 
@@ -46,6 +193,7 @@ Every module does one thing. If you can't describe what it does in one sentence 
 | `render.ts` | Format knowledge entries as markdown for LLM consumption |
 | `scorer.ts` | Score area relevance from signals |
 | `state.ts` | Track session state (loaded areas, turn count) |
+| `workspace.ts` | Workspace CRUD, active workspace tracking, session isolation |
 
 ### Open/Closed (O)
 
@@ -78,7 +226,7 @@ Consumers depend only on what they use.
 
 High-level modules depend on abstractions, not concrete implementations.
 
-```
+```typescript
 // YES — depend on interface
 function addFact(store: KnowledgeStore, entry: FactEntry): string
 
@@ -91,7 +239,7 @@ function addFact(jsonlPath: string, sqliteDb: Database, entry: FactEntry): strin
 - CLI and extension receive dependencies via constructor injection or factory functions
 - Tests inject mocks/stubs that satisfy the same interfaces
 
-## 3. Design Patterns
+## 7. Design Patterns
 
 | Pattern | Where | Why |
 |---------|-------|-----|
@@ -102,7 +250,7 @@ function addFact(jsonlPath: string, sqliteDb: Database, entry: FactEntry): strin
 | **Factory** | DB initialization | `createDatabase()` handles schema creation, WAL mode, FTS5 setup. Callers get a ready-to-use database. |
 | **Null Object** | Missing brain | When brain doesn't exist, return empty results instead of throwing. Auto-init handles creation. |
 
-## 4. TypeScript Standards
+## 8. TypeScript Standards
 
 **Strict typing:**
 - `strict: true` in tsconfig.json
@@ -143,7 +291,7 @@ class JsonlSqliteStore implements KnowledgeStore {
 - Never catch and swallow errors silently
 - Return `null` for "not found" cases, throw for "something is wrong" cases
 
-## 5. Commit Discipline
+## 9. Commit Discipline
 
 **One logical change per commit.** Each commit should be independently understandable and revertable.
 
@@ -154,9 +302,11 @@ feat: implement addFact with provenance support
 refactor: extract provenance builder into separate function
 ```
 
+**Combined commits:** RED+GREEN may be combined into a single `feat:` commit when the change is small (<50 lines implementation) and cohesive. Never combine across features.
+
 **Conventional commits:**
-- `test:` — test code (RED step)
-- `feat:` — implementation code (GREEN step)
+- `test:` — test code (RED step, or adding missing test coverage)
+- `feat:` — implementation code (GREEN step, or combined RED+GREEN)
 - `refactor:` — refactoring (REFACTOR step)
 - `fix:` — bug fix
 - `docs:` — documentation
@@ -164,17 +314,19 @@ refactor: extract provenance builder into separate function
 
 **No AI attribution in commits.** No "Generated with", no "Co-Authored-By", no mentions of AI assistance.
 
-## 6. Code Review Checklist
+---
 
-Before considering any code complete:
+## Updating This Document
 
-- [ ] Every public function has a test
-- [ ] Tests describe behavior, not implementation
-- [ ] No `any` types
-- [ ] Interfaces defined before implementations
-- [ ] Dependencies injected, not hardcoded
-- [ ] Single responsibility — each module does one thing
-- [ ] Error cases handled — not swallowed, not ignored
-- [ ] No premature abstractions — if it's used once, inline it
-- [ ] No dead code — if it's not called, delete it
-- [ ] Functions under 30 lines — if longer, extract
+This manifesto is a living document. When a bug escapes that should have been caught:
+
+1. Identify which checklist item would have prevented it
+2. If no item exists, add one to the Feature Completion Checklist
+3. If an anti-pattern caused it, add it to the Anti-Patterns table
+4. Increment the version number
+
+### Changelog
+
+**v2.0 (2026-03-18)** — Major revision. Added testing pyramid (4 layers), change type → test requirements mapping, feature completion checklist, and anti-patterns table. Triggered by session isolation implementation where unit tests passed but the actual multi-instance bug was only caught by E2E tests that weren't written until prompted. The manifesto now mandates E2E isolation tests for any feature touching shared mutable state. Relaxed commit discipline to allow combined RED+GREEN for small changes. Added `workspace.ts` to module responsibility table.
+
+**v1.0 (initial)** — TDD protocol, SOLID principles, design patterns, TypeScript standards, commit discipline, code review checklist.
