@@ -1,7 +1,7 @@
 # Graph Backend — Design Document
 
 **Date:** 2026-03-18
-**Status:** Draft — Iteration 1
+**Status:** Draft — Iteration 2
 **Prerequisite:** [graph-backend-MOTIVATION.md](./graph-backend-MOTIVATION.md)
 
 ---
@@ -13,23 +13,121 @@ must have a clear answer before implementation begins.
 
 ### DD-1: Source of truth
 
-**Question:** Does JSONL remain the source of truth, or does EdgeDB become it?
+**Question:** Does JSONL remain the source of truth, or does Gel become it?
 
 **The tension:** Explicit relationships (`kb relate A B`) have no natural
-JSONL representation. If JSONL is source of truth, `kb rebuild --edgedb`
-loses relationships. If EdgeDB is source of truth, we lose git-tracked
-diffs and offline operation.
+JSONL representation. If JSONL is source of truth, `kb rebuild` loses
+relationships. If Gel is source of truth, we lose git-tracked diffs and
+offline operation.
 
-**Options:**
+**Research findings:**
+
+1. **EdgeDB is now Gel** (renamed Feb 2025, same tool). No embedded mode —
+   requires a running server process. Not suitable as the sole store for a
+   portable, offline-capable tool.
+
+2. **Graphiti (Zep)** uses event sourcing for knowledge graphs: append-only
+   episode log → materialized graph. Episodes are source of truth. Graph
+   is a derived projection that can be rebuilt. Closest architectural match
+   to mykb's JSONL + derived index pattern.
+
+3. **Obsidian/Logseq** keep files as source of truth. Graph is computed at
+   runtime from `[[wiki-links]]`. Never persisted separately.
+
+4. **N-Triples** (RDF): one triple per line (`<subject> <predicate> <object>`),
+   git-friendly, line-oriented. Proves that graph relationships CAN be
+   stored in a flat, append-only, diffable format.
+
+5. **No system has fully solved portable + graph + git + offline.** The
+   closest pattern: flat files as source of truth, graph materialized on
+   demand into an optional query engine.
+
+**The key insight:** The original tension ("relationships can't live in
+JSONL") is false. Relationships CAN be stored in JSONL — either inline
+on entries or in a dedicated relationships file. The graph DB is then a
+materialized view, not a source of truth. This is the same pattern mykb
+already uses with SQLite.
+
+**Options (revised):**
 
 | Option | Pros | Cons |
 |--------|------|------|
-| A: JSONL stays source of truth | Git history, offline, portable, proven | Relationships lost on rebuild. Need a `relationships.jsonl` that breaks per-area model. |
-| B: EdgeDB becomes source of truth | Relationships are native. Single store. | No git diffs. Offline breaks. Need `edgedb dump` for backup. |
-| C: Hybrid — JSONL for entries, EdgeDB for relationships | Each store owns what it's good at. JSONL stays git-tracked. | Two sources of truth. Consistency is complex. |
-| D: EdgeDB source of truth + JSONL export | EdgeDB owns all data. `kb export` generates JSONL for git archival. | Export is a snapshot, not append-only. Git diffs are noisy. |
+| ~~A: JSONL only~~ | ~~Relationships lost on rebuild~~ | ~~Rejected — original framing was wrong~~ |
+| ~~B: Gel becomes source of truth~~ | ~~Single store~~ | ~~Rejected — Gel requires server, no offline, no git~~ |
+| **E: JSONL with relationships + Gel as materialized view** | Git-friendly, offline, portable. Gel adds graph queries when available. No data loss on rebuild. | Relationships file is global (cross-area). Gel is optional infrastructure. |
 
-**Status:** Unresolved.
+**Decision: Option E.**
+
+JSONL remains the sole source of truth. Relationships are stored in JSONL.
+Gel materializes a graph index for fast traversal queries, exactly like
+SQLite materializes a text index for fast search queries. Both are
+rebuildable from JSONL. Both are optional.
+
+```
+JSONL files (source of truth, git-tracked)
+  ├──> entries: areas/<id>/facts.jsonl, decisions.jsonl, ...
+  ├──> relationships: relationships.jsonl (global, cross-area)
+  │
+  ├──> SQLite FTS5 (derived, rebuildable) → kb search
+  └──> Gel (derived, rebuildable, optional) → kb traverse, kb related
+```
+
+**Relationship storage in JSONL:**
+
+A global `~/.mykb/relationships.jsonl` file. Each line is one relationship:
+
+```jsonl
+{"id":"r001","from":"f001","from_area":"stark-picking","to":"d003","to_area":"infra-vm","type":"references","source":"explicit","confidence":1.0,"created":"2026-03-18","updated":"2026-03-18"}
+{"id":"r002","from":"area:stark-picking","to":"area:infra-vm","type":"linked_areas","source":"extracted","confidence":0.9,"created":"2026-03-18","updated":"2026-03-18"}
+```
+
+Why global, not per-area:
+- Relationships are cross-area by nature (area A → area B)
+- Per-area files would duplicate cross-area relationships or arbitrarily
+  assign them to one side
+- One file is simpler, diffs cleanly, compacts easily
+
+Why this works:
+- Append-only (same as entry JSONL)
+- Git-friendly (one line per relationship, clean diffs)
+- `kb compact --relationships` removes superseded/deleted relationships
+- `kb rebuild` reads entries JSONL + relationships JSONL → rebuilds
+  both SQLite and Gel
+
+**Status:** Resolved.
+
+---
+
+### DD-1a: Gel vs alternatives for the graph materialized view
+
+**Question:** Now that Gel is just a materialized view (not source of
+truth), is it still the right choice? Or is something lighter sufficient?
+
+**Options:**
+
+| Option | Query language | Server required | Offline | Fit |
+|--------|---------------|-----------------|---------|-----|
+| **Gel (EdgeDB)** | EdgeQL + GraphQL | Yes (PostgreSQL) | No | Powerful but heavy for a derived index |
+| **SQLite + relationship tables** | SQL + recursive CTEs | No (embedded) | Yes | Already have SQLite. Relationship queries are ugly but work. |
+| **FalkorDBLite** | Cypher | No (embedded) | Yes | Young project, but embedded graph with real query language |
+| **In-memory graph (custom)** | TypeScript API | No | Yes | Built on startup from JSONL, no persistence needed |
+
+Since Gel is now optional infrastructure (not source of truth), the bar
+is different. The question is: do graph queries justify running a
+PostgreSQL server?
+
+For a personal knowledge base with ~1000 entries and ~5000 relationships:
+- SQLite with a `relationships` table and recursive CTEs may be sufficient
+- An in-memory graph built on `kb rebuild` from JSONL is another option
+- Gel becomes relevant if/when the graph grows or external tools need
+  the GraphQL API
+
+**Decision:** Deferred. Start with SQLite relationship tables (zero new
+infrastructure). Add Gel later if graph query complexity justifies it.
+The architecture supports both because the source of truth is JSONL
+regardless.
+
+**Status:** Resolved (start with SQLite, Gel is a future upgrade).
 
 ---
 
@@ -127,26 +225,30 @@ On reconnect, a reconciliation pass syncs missed writes from JSONL to EdgeDB.
 
 ### DD-5: Search strategy
 
-**Question:** EdgeDB has no FTS5 equivalent. How does search work?
+**Question:** How does search work with the graph backend?
 
-**Decision:** Keep SQLite FTS5 for full-text search. EdgeDB handles
-graph queries. This is a three-store system:
-
-```
-JSONL (source of truth / git-tracked)
-  ├──> SQLite FTS5 (full-text search — kb search)
-  └──> EdgeDB (graph queries — kb traverse, kb related, kb impact)
-```
-
-Or if DD-1 resolves to EdgeDB as source of truth:
+**Decision:** SQLite handles BOTH full-text search AND graph queries.
+Per DD-1/DD-1a, we're starting with SQLite (not Gel). SQLite gets a
+new `relationships` table alongside the existing FTS5 index:
 
 ```
-EdgeDB (source of truth)
-  ├──> SQLite FTS5 (full-text search — derived, rebuildable)
-  └──> JSONL (export format — derived, for git archival)
+JSONL (source of truth, git-tracked)
+  ├──> entries: areas/<id>/*.jsonl
+  └──> relationships: relationships.jsonl
+           │
+           └──> SQLite (derived, rebuildable)
+                  ├──> entries table + FTS5 index (existing) → kb search
+                  └──> relationships table (new) → kb traverse, kb related
 ```
 
-**Status:** Depends on DD-1.
+Single derived store. No new infrastructure. `kb rebuild` rebuilds
+everything from JSONL.
+
+If graph queries outgrow SQLite's capabilities, Gel can be added as an
+additional materialized view later — the JSONL source of truth doesn't
+change.
+
+**Status:** Resolved.
 
 ---
 
@@ -232,22 +334,79 @@ type JournalEntry extending Timestamped {
 
 **Question:** How is the graph data backed up?
 
-**Depends on DD-1:**
+**Decision:** JSONL is the source of truth (DD-1). Backup = git.
+Relationships live in `relationships.jsonl`, so they're git-tracked like
+everything else. `kb rebuild` regenerates SQLite (entries + relationships
+tables) from JSONL at any time.
 
-- If JSONL is source of truth: `kb rebuild --edgedb` restores everything
-  except explicit relationships (which are lost — this is the DD-1 tension)
-- If EdgeDB is source of truth: `edgedb dump` / `edgedb restore` for full
-  backup. `kb export --jsonl` for human-readable snapshot.
-- If hybrid: both mechanisms needed.
+No new backup mechanism needed. The existing `kb save` → git commit flow
+covers entries AND relationships.
 
-**Status:** Depends on DD-1.
+**Status:** Resolved.
 
 ---
 
-## Schema (Draft)
+## SQLite Relationship Schema
 
-Pending resolution of DD-1. The schema below assumes DD-2 through DD-8
-are resolved as stated above.
+The immediate implementation. Extends the existing `kb.db` with a
+relationships table. Rebuilt from `relationships.jsonl` by `kb rebuild`.
+
+```sql
+-- New table in kb.db (alongside existing entries + FTS5 tables)
+CREATE TABLE relationships (
+  id          TEXT PRIMARY KEY,
+  from_id     TEXT NOT NULL,    -- entry_id or 'area:<slug>'
+  from_area   TEXT NOT NULL,    -- area slug of the source
+  to_id       TEXT NOT NULL,    -- entry_id or 'area:<slug>'
+  to_area     TEXT NOT NULL,    -- area slug of the target
+  type        TEXT NOT NULL,    -- 'references' | 'supersedes' | 'linked_areas'
+  source      TEXT NOT NULL DEFAULT 'explicit',  -- 'explicit' | 'extracted'
+  confidence  REAL NOT NULL DEFAULT 1.0,
+  created     TEXT NOT NULL,
+  updated     TEXT NOT NULL
+);
+
+CREATE INDEX idx_rel_from ON relationships(from_id);
+CREATE INDEX idx_rel_to ON relationships(to_id);
+CREATE INDEX idx_rel_type ON relationships(type);
+CREATE INDEX idx_rel_from_area ON relationships(from_area);
+CREATE INDEX idx_rel_to_area ON relationships(to_area);
+```
+
+### Traversal query (SQLite recursive CTE)
+
+"Find all entries connected to entry X within depth 2":
+
+```sql
+WITH RECURSIVE traverse(id, area, depth, path) AS (
+  -- Seed: the starting entry
+  SELECT to_id, to_area, 1, from_id || '->' || to_id
+  FROM relationships
+  WHERE from_id = :start_id AND type IN (:edge_types)
+  UNION
+  -- Recurse: follow edges from discovered entries
+  SELECT r.to_id, r.to_area, t.depth + 1, t.path || '->' || r.to_id
+  FROM relationships r
+  JOIN traverse t ON r.from_id = t.id
+  WHERE t.depth < :max_depth
+    AND r.type IN (:edge_types)
+    AND r.to_id NOT IN (SELECT id FROM traverse)  -- cycle protection
+)
+SELECT DISTINCT e.*
+FROM traverse t
+JOIN entries e ON e.id = t.id;
+```
+
+Not as clean as Cypher or EdgeQL, but it works for the current scale
+(~1000 entries, ~5000 relationships) with no new infrastructure.
+
+---
+
+## Gel Schema (Future)
+
+If graph query complexity outgrows SQLite, Gel (formerly EdgeDB) can be
+added as an additional materialized view. This schema uses polymorphic
+types as decided in DD-2.
 
 ```esdl
 module default {
@@ -272,8 +431,6 @@ module default {
       created: datetime { default := datetime_current(); };
       source: str { default := 'explicit'; };
     };
-
-    # Computed backlinks
     multi entries := .<area[is Entry];
     multi linked_from := .<linked_areas[is Area];
     multi workspaces := .<areas[is Workspace];
@@ -294,8 +451,6 @@ module default {
       confidence: float32 { default := 1.0; };
     };
     multi supersedes: Entry;
-
-    # Computed backlinks
     multi referenced_by := .<references[is Entry];
     multi superseded_by := .<supersedes[is Entry];
   }
@@ -332,7 +487,6 @@ module default {
     jira: str;
     wiki: str;
     multi repos: str;
-
     multi journal := .<workspace[is JournalEntry];
   }
 
@@ -393,16 +547,15 @@ export interface GraphStore {
 
 ## Open — Blocking
 
-1. **DD-1 must be resolved** before implementation. Everything else flows
-   from the source-of-truth decision.
+None. All design decisions resolved. Ready for implementation planning.
 
 ## Open — Non-blocking
 
-2. EdgeDB deployment model (local vs Docker vs cloud)
-3. Performance benchmarks at mykb scale (~1000 entries, ~5000 edges)
-4. GraphQL exposure — internal only or external API?
-5. Access control model for graph queries
-6. Migration tooling from JSONL to EdgeDB (bulk import)
+1. Performance benchmarks: SQLite recursive CTEs at mykb scale (~1000 entries, ~5000 edges)
+2. Gel deployment model if/when SQLite is outgrown (local vs Docker vs cloud)
+3. GraphQL exposure — only relevant if Gel is added
+4. Relationship visualization (`kb graph` output format — Mermaid? DOT? interactive?)
+5. Should `kb relate` be a separate command or integrated into `kb add` with `--references` flag?
 
 ---
 
@@ -410,4 +563,5 @@ export interface GraphStore {
 
 | Date | Change |
 |------|--------|
-| 2026-03-18 | Initial draft. Separated from motivation doc. Addressed review: polymorphic types, relationship metadata, cycle protection, degraded mode, search strategy, JournalEntry ownership, extraction reliability. DD-1 (source of truth) left unresolved. |
+| 2026-03-18 | Iteration 1: Separated from motivation doc. Addressed review: polymorphic types, relationship metadata, cycle protection, degraded mode, search strategy, JournalEntry ownership, extraction reliability. DD-1 (source of truth) left unresolved. |
+| 2026-03-18 | Iteration 2: Resolved DD-1. Research found: EdgeDB renamed to Gel (no embedded mode), Graphiti event-sourcing pattern, N-Triples as git-friendly graph format. Key insight: relationships CAN live in JSONL. Decision: JSONL stays source of truth with `relationships.jsonl` for graph edges. Gel demoted from primary store to optional future materialized view. SQLite with relationship table is the immediate implementation. Added SQLite schema with recursive CTE traversal. Resolved DD-5 (search) and DD-9 (backup) as consequences of DD-1. All DDs now resolved. |

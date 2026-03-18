@@ -90,27 +90,28 @@ interfaces plus a new `GraphStore` interface for graph-specific queries.
 
 ---
 
-## 5. Candidate: EdgeDB
+## 5. Approach: JSONL Relationships + Materialized Graph
 
-EdgeDB is a graph-relational database built on PostgreSQL with:
-- First-class relationship links (not join tables)
-- Schema DSL that maps to the mykb domain model
-- Built-in GraphQL endpoint
-- Native TypeScript client with type generation
-- PostgreSQL-backed (battle-tested storage)
+Research (see design doc iteration 2) found that:
 
-Alternative options considered:
+- **EdgeDB is now Gel** (renamed Feb 2025). No embedded mode — requires a
+  running PostgreSQL server. Too heavy as the sole store.
+- **Relationships CAN live in JSONL** — one line per edge, append-only,
+  git-friendly. Similar to N-Triples (RDF) which proves flat-file graph
+  storage works.
+- **Graphiti (Zep)** validates the event-sourcing pattern: append-only
+  log → materialized graph. Same architecture mykb already uses.
 
-| Option | Verdict | Reasoning |
-|--------|---------|-----------|
-| **Neo4j** | Possible | Most mature graph DB; has embedded mode and Bolt protocol for TypeScript. Heavy JVM dependency. Needs benchmarking at mykb scale. |
-| **SurrealDB** | Possible | Document + graph in one. Younger project, API has stabilized recently. |
-| **SQLite + recursive CTEs** | Insufficient | Already have it. Relationship queries get ugly fast, no first-class graph semantics. |
-| **Plain GraphQL over JSONL** | Insufficient | Structured queries but no relationship storage. |
-| **EdgeDB** | Preferred | Best balance of schema rigor, graph capabilities, TypeScript integration, and PostgreSQL reliability. |
+The decided approach (see design doc):
 
-The choice is not final. A design document will evaluate the trade-offs
-in detail, including benchmarks and a proof-of-concept.
+1. **JSONL stays source of truth** — entries + a new `relationships.jsonl`
+2. **SQLite materializes the graph** — new relationships table with
+   recursive CTE traversal, alongside existing FTS5 index
+3. **Gel is a future option** — if graph queries outgrow SQLite, Gel can
+   be added as an additional materialized view. The architecture supports
+   this because JSONL is always the source of truth.
+
+No new infrastructure required for the initial implementation.
 
 ---
 
