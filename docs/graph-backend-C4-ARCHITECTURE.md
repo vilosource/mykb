@@ -1,143 +1,216 @@
 # mykb v2 Graph Backend - C4 Architecture Diagrams
 
-This document contains the complete C4 architecture for the mykb v2 knowledge management system, showing the system context, container architecture, and detailed component design of the kb CLI.
+This document contains the C4 architecture for the mykb v2 knowledge management system.
 
 ## C1 - System Context Diagram
 
-The system context diagram shows how the mykb knowledge management system fits into the broader ecosystem, including all the different types of users and external systems it integrates with.
+Shows how mykb fits into the broader ecosystem — users, agents, and external systems.
 
 ```mermaid
-C4Context
-    title System Context Diagram for mykb v2 Knowledge Management System
+graph TB
+    subgraph actors [" "]
+        direction LR
+        human["👤 Human Operator<br/><i>Engineers & developers<br/>using kb CLI from terminal</i>"]
+        agents["🤖 AI Coding Agents<br/><i>vf-agents/Pi containers<br/>multiple concurrent instances</i>"]
+        claude["🧠 Claude Code Agent<br/><i>AI coding assistant<br/>using kb CLI on host</i>"]
+        curator["⚙️ Curator Agent<br/><i>Automated knowledge<br/>curation agent</i>"]
+    end
 
-    Person(human, "Human Operator", "Infrastructure engineers and developers using kb CLI from terminal")
-    Person(agents, "AI Coding Agents", "vf-agents/Pi containerized instances accessing kb via CLI")
-    Person(claude, "Claude Code Agent", "AI coding assistant using kb CLI on host")
-    Person(curator, "Curator Agent", "Automated knowledge curation agent")
+    mykb(["📚 mykb Knowledge Management System<br/><i>Graph-relational knowledge base<br/>Gel on PostgreSQL, CLI interface</i>"])
 
-    System(mykb, "mykb Knowledge Management System", "Graph-relational knowledge base with CLI interface")
+    subgraph external [" "]
+        direction LR
+        jira["🎫 Jira<br/><i>Issue tracking</i>"]
+        gitlab["🦊 GitLab<br/><i>Source code repos</i>"]
+        wiki["📖 Wiki<br/><i>Documentation</i>"]
+        github["🐙 GitHub<br/><i>JSONL export archive</i>"]
+    end
 
-    System_Ext(jira, "Jira", "Issue tracking system, linked from workspaces")
-    System_Ext(gitlab, "GitLab", "Source code repositories, linked from workspaces")
-    System_Ext(wiki, "Wiki", "Documentation system, linked from workspaces")
-    System_Ext(github, "GitHub", "JSONL export archive and version history")
+    human -->|"kb CLI commands"| mykb
+    agents -->|"kb CLI in containers"| mykb
+    claude -->|"kb CLI on host"| mykb
+    curator -->|"Automated curation"| mykb
 
-    Rel(human, mykb, "Uses", "kb CLI commands")
-    Rel(agents, mykb, "Uses", "kb CLI in containers")
-    Rel(claude, mykb, "Uses", "kb CLI on host")
-    Rel(curator, mykb, "Manages", "Automated curation")
+    mykb -.->|"Read reference"| jira
+    mykb -.->|"Read reference"| gitlab
+    mykb -.->|"Read reference"| wiki
+    mykb -->|"JSONL export<br/>git push"| github
 
-    Rel(mykb, jira, "Links to", "Read reference only")
-    Rel(mykb, gitlab, "Links to", "Read reference only")
-    Rel(mykb, wiki, "Links to", "Read reference only")
-    Rel(mykb, github, "Archives to", "JSONL export via git push")
+    style mykb fill:#1a5276,stroke:#2e86c1,color:#fff,stroke-width:3px
+    style human fill:#1c2833,stroke:#5dade2,color:#fff
+    style agents fill:#1c2833,stroke:#5dade2,color:#fff
+    style claude fill:#1c2833,stroke:#5dade2,color:#fff
+    style curator fill:#1c2833,stroke:#5dade2,color:#fff
+    style jira fill:#2c3e50,stroke:#7f8c8d,color:#fff
+    style gitlab fill:#2c3e50,stroke:#7f8c8d,color:#fff
+    style wiki fill:#2c3e50,stroke:#7f8c8d,color:#fff
+    style github fill:#2c3e50,stroke:#7f8c8d,color:#fff
+    style actors fill:transparent,stroke:none
+    style external fill:transparent,stroke:none
+
+    linkStyle 0,1,2,3 stroke:#5dade2,stroke-width:2px
+    linkStyle 4,5,6 stroke:#7f8c8d,stroke-width:1px,stroke-dasharray:5
+    linkStyle 7 stroke:#27ae60,stroke-width:2px
 ```
 
 ## C2 - Container Diagram
 
-The container diagram shows the major containers within the mykb system and how they interact. The system is built around Gel (PostgreSQL) as the primary store with local SQLite caches for offline fallback.
+The major containers within mykb and how they interact. Gel (PostgreSQL) is the source of truth. SQLite provides offline read fallback.
 
 ```mermaid
-C4Container
-    title Container Diagram for mykb v2 Knowledge Management System
+graph TB
+    users["👤🤖🧠 Users & Agents<br/><i>Humans, AI agents, curator</i>"]
+    ext["🔗 External Systems<br/><i>Jira, GitLab, Wiki</i>"]
 
-    Person(users, "Users & Agents", "Human operators, AI agents, curator")
-    System_Ext(external, "External Systems", "Jira, GitLab, Wiki, GitHub")
+    subgraph system ["mykb Knowledge Management System"]
+        direction TB
 
-    System_Boundary(mykb, "mykb Knowledge Management System") {
-        Container(cli, "kb CLI", "TypeScript", "Command-line interface for all knowledge operations")
-        Container(gel, "Gel Database", "PostgreSQL + EdgeQL", "Graph-relational database, source of truth for all knowledge")
-        Container(graphql, "GraphQL API", "Built-in to Gel", "Auto-generated API for external tool access")
-        Container(sqlite, "SQLite Cache", "SQLite + FTS5", "Per-client read-only cache for offline fallback")
-        Container(jsonl, "JSONL Export", "File System", "Portable export format for migration and archival")
-    }
+        cli["⌨️ kb CLI<br/><i>TypeScript</i><br/>Command-line interface<br/>for all knowledge operations"]
 
-    Rel(users, cli, "Uses", "kb commands")
-    Rel(cli, gel, "Reads/Writes", "Primary data path")
-    Rel(cli, sqlite, "Reads", "Fallback when Gel down")
-    Rel(cli, jsonl, "Export/Import", "Migration operations")
-    Rel(gel, graphql, "Exposes", "Built-in API")
-    Rel(external, graphql, "Queries", "Read/query access")
-    Rel(jsonl, external, "Archives to", "GitHub via git push")
-    Rel(sqlite, gel, "Syncs from", "kb sync command")
+        subgraph storage ["Data Stores"]
+            direction LR
+            gel[("🗄️ Gel Database<br/><i>PostgreSQL + EdgeQL</i><br/>Source of truth<br/>Graph-relational store<br/>Access policies + audit")]
+            graphql["🌐 GraphQL API<br/><i>Built-in to Gel</i><br/>Auto-generated API<br/>for external tools"]
+            sqlite[("💾 SQLite Cache<br/><i>SQLite + FTS5</i><br/>Per-client read-only<br/>Offline fallback")]
+        end
+
+        jsonl["📄 JSONL Export<br/><i>File system</i><br/>Portable format<br/>Migration & archival"]
+    end
+
+    github["🐙 GitHub<br/><i>Export archive</i>"]
+
+    users -->|"kb commands"| cli
+    cli -->|"Reads / Writes<br/>(primary path)"| gel
+    cli -.->|"Reads only<br/>(fallback when Gel down)"| sqlite
+    cli -->|"Export / Import"| jsonl
+    gel --- graphql
+    ext -->|"Queries"| graphql
+    sqlite -.->|"kb sync"| gel
+    jsonl -->|"git push"| github
+
+    style users fill:#1c2833,stroke:#5dade2,color:#fff
+    style ext fill:#2c3e50,stroke:#7f8c8d,color:#fff
+    style cli fill:#1a5276,stroke:#2e86c1,color:#fff,stroke-width:2px
+    style gel fill:#0e6251,stroke:#1abc9c,color:#fff,stroke-width:3px
+    style graphql fill:#0e6251,stroke:#1abc9c,color:#fff
+    style sqlite fill:#4a235a,stroke:#8e44ad,color:#fff
+    style jsonl fill:#7b241c,stroke:#e74c3c,color:#fff
+    style github fill:#2c3e50,stroke:#7f8c8d,color:#fff
+    style system fill:#1c283308,stroke:#5dade2,color:#fff,stroke-width:2px
+    style storage fill:#1c283308,stroke:#7f8c8d,color:#fff,stroke-dasharray:5
+
+    linkStyle 0 stroke:#5dade2,stroke-width:2px
+    linkStyle 1 stroke:#1abc9c,stroke-width:3px
+    linkStyle 2 stroke:#8e44ad,stroke-width:1px,stroke-dasharray:5
+    linkStyle 3 stroke:#e74c3c,stroke-width:2px
+    linkStyle 4 stroke:#1abc9c,stroke-width:1px
+    linkStyle 5 stroke:#7f8c8d,stroke-width:1px
+    linkStyle 6 stroke:#8e44ad,stroke-width:1px,stroke-dasharray:5
+    linkStyle 7 stroke:#27ae60,stroke-width:2px
 ```
 
 ## C3 - Component Diagram (kb CLI)
 
-The component diagram shows the internal structure of the kb CLI, including the store abstractions, relationship extraction, and audit logging that power the graph-relational knowledge management.
+Internal structure of the kb CLI. Shows the store abstractions, interface boundaries, audit logging, and relationship extraction.
 
 ```mermaid
-C4Component
-    title Component Diagram for kb CLI Container
+graph TB
+    user["👤🤖 User / Agent"]
 
-    Person(user, "User/Agent", "Operators using kb commands")
-    Container_Ext(gel_db, "Gel Database", "PostgreSQL + EdgeQL", "Primary graph-relational store")
-    Container_Ext(sqlite_cache, "SQLite Cache", "SQLite + FTS5", "Local read-only cache")
+    subgraph cli ["kb CLI Container"]
+        direction TB
 
-    System_Boundary(cli, "kb CLI Container") {
-        Component(commands, "CLI Commands", "Commander.js", "kb add, load, search, traverse, relate, export, sync")
-        Component(client, "KbClient", "TypeScript", "Router/orchestrator, checks Gel availability, routes operations")
-        Component(audited, "AuditedStore", "Decorator Pattern", "Wraps GelStore, creates ChangeLog entries, audit attribution")
-        Component(gel_store, "GelStore", "TypeScript", "Primary store implementation, handles CRUD and graph operations")
-        Component(sqlite_store, "SqliteCacheStore", "TypeScript", "Offline cache, implements KnowledgeReader only")
-        Component(extractor, "RelationshipExtractor", "TypeScript", "Analyzes text, extracts implicit relationships with confidence scores")
+        commands["⌨️ CLI Commands<br/><i>Commander.js</i><br/>kb add, load, search,<br/>traverse, relate, export"]
 
-        Component_Boundary(interfaces, "Store Interfaces") {
-            Component(reader, "KnowledgeReader", "Interface", "loadArea, search, matchAreas")
-            Component(writer, "KnowledgeWriter", "Interface", "addFact, addDecision, updateEntry, deleteEntry")
-            Component(grapher, "GraphQuerier", "Interface", "traverse, related, impact, relate, unrelate")
-        }
-    }
+        client["🔀 KbClient<br/><i>Router / Orchestrator</i><br/>Checks Gel availability<br/>Routes to correct store"]
 
-    Rel(user, commands, "Uses", "kb CLI commands")
-    Rel(commands, client, "Calls", "Routed operations")
+        subgraph write_path ["Write Path (Gel required)"]
+            direction TB
+            audited["📋 AuditedStore<br/><i>Decorator Pattern</i><br/>Wraps GelStore<br/>Creates ChangeLog entries<br/>Agent + user attribution"]
+            gel_store["🗄️ GelStore<br/><i>Primary Implementation</i><br/>CRUD + graph operations<br/>EdgeQL client"]
+            extractor["🔍 RelationshipExtractor<br/><i>Text Analysis</i><br/>Extracts implicit refs<br/>3-tier confidence scoring"]
+        end
 
-    Rel(client, audited, "Writes via", "All write/graph operations")
-    Rel(client, sqlite_store, "Reads via", "Fallback when Gel down")
+        subgraph read_fallback ["Read Fallback"]
+            sqlite_store["💾 SqliteCacheStore<br/><i>KnowledgeReader only</i><br/>Entries + FTS5 index<br/>Cannot receive writes"]
+        end
 
-    Rel(audited, gel_store, "Wraps", "Adds audit logging")
-    Rel(gel_store, gel_db, "Connects to", "EdgeQL client")
-    Rel(sqlite_store, sqlite_cache, "Connects to", "SQL queries")
+        subgraph interfaces ["Interfaces"]
+            direction LR
+            reader["📖 KnowledgeReader<br/><i>loadArea, search<br/>matchAreas</i>"]
+            writer["✏️ KnowledgeWriter<br/><i>addFact, addDecision<br/>updateEntry, deleteEntry</i>"]
+            grapher["🕸️ GraphQuerier<br/><i>traverse, related<br/>impact, relate</i>"]
+        end
+    end
 
-    Rel(gel_store, extractor, "Uses", "On write operations")
-    Rel(extractor, gel_store, "Creates", "Graph relationships")
+    gel_db[("🗄️ Gel Database<br/><i>PostgreSQL</i>")]
+    sqlite_db[("💾 SQLite Cache<br/><i>Local file</i>")]
 
-    Rel(gel_store, reader, "Implements")
-    Rel(gel_store, writer, "Implements")
-    Rel(gel_store, grapher, "Implements")
-    Rel(sqlite_store, reader, "Implements")
+    user -->|"kb commands"| commands
+    commands --> client
 
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
+    client -->|"Writes + graph ops"| audited
+    client -.->|"Reads (fallback)"| sqlite_store
+
+    audited -->|"Delegates + logs"| gel_store
+    gel_store -->|"On write"| extractor
+    extractor -->|"Creates edges"| gel_store
+
+    gel_store -->|"EdgeQL"| gel_db
+    sqlite_store -->|"SQL"| sqlite_db
+
+    gel_store -.-|"implements"| reader
+    gel_store -.-|"implements"| writer
+    gel_store -.-|"implements"| grapher
+    sqlite_store -.-|"implements"| reader
+
+    style user fill:#1c2833,stroke:#5dade2,color:#fff
+    style commands fill:#1a5276,stroke:#2e86c1,color:#fff
+    style client fill:#1a5276,stroke:#2e86c1,color:#fff,stroke-width:2px
+    style audited fill:#7d6608,stroke:#f1c40f,color:#fff,stroke-width:2px
+    style gel_store fill:#0e6251,stroke:#1abc9c,color:#fff,stroke-width:2px
+    style extractor fill:#0e6251,stroke:#1abc9c,color:#fff
+    style sqlite_store fill:#4a235a,stroke:#8e44ad,color:#fff
+    style reader fill:#1c2833,stroke:#5dade2,color:#fff
+    style writer fill:#1c2833,stroke:#27ae60,color:#fff
+    style grapher fill:#1c2833,stroke:#e67e22,color:#fff
+    style gel_db fill:#0e6251,stroke:#1abc9c,color:#fff
+    style sqlite_db fill:#4a235a,stroke:#8e44ad,color:#fff
+    style cli fill:#1c283308,stroke:#5dade2,color:#fff,stroke-width:2px
+    style write_path fill:#0e625108,stroke:#1abc9c,color:#fff,stroke-dasharray:5
+    style read_fallback fill:#4a235a08,stroke:#8e44ad,color:#fff,stroke-dasharray:5
+    style interfaces fill:#1c283308,stroke:#7f8c8d,color:#fff,stroke-dasharray:5
+
+    linkStyle 0,1 stroke:#5dade2,stroke-width:2px
+    linkStyle 2 stroke:#f1c40f,stroke-width:2px
+    linkStyle 3 stroke:#8e44ad,stroke-width:1px,stroke-dasharray:5
+    linkStyle 4 stroke:#1abc9c,stroke-width:2px
+    linkStyle 5,6 stroke:#1abc9c,stroke-width:1px
+    linkStyle 7 stroke:#1abc9c,stroke-width:2px
+    linkStyle 8 stroke:#8e44ad,stroke-width:1px
+    linkStyle 9,10,11,12 stroke:#7f8c8d,stroke-width:1px,stroke-dasharray:3
 ```
 
 ## Architecture Notes
 
-### Key Design Decisions
-
-1. **Graph-Relational Hybrid**: Uses Gel (PostgreSQL + EdgeQL) to combine relational data modeling with graph traversal capabilities, enabling both structured queries and relationship exploration.
-
-2. **Multi-Store Pattern**: Primary store (Gel) with local cache fallback (SQLite) ensures availability even when the main database is down, critical for AI agents and continuous operations.
-
-3. **Audit-by-Design**: All write operations are wrapped by AuditedStore to create automatic change logs, enabling provenance tracking and rollback capabilities.
-
-4. **Implicit Relationship Extraction**: The RelationshipExtractor analyzes entry text to automatically create graph edges, reducing manual linking overhead while building rich knowledge graphs.
-
-5. **Interface Segregation**: Clean separation between KnowledgeReader, KnowledgeWriter, and GraphQuerier interfaces allows different implementations (Gel vs SQLite) and enforces read-only constraints where needed.
-
 ### Data Flow Examples
 
-**Write Operation Flow (kb add fact)**:
-CLI Command → KbClient → AuditedStore → GelStore → RelationshipExtractor → Graph Relationships
+**Write (kb add fact):**
+CLI Command → KbClient.write() → AuditedStore.addFact() → GelStore.addFact() + ChangeLog → RelationshipExtractor → graph edges
 
-**Read Operation Flow (Gel available)**:
-CLI Command → KbClient → GelStore → Gel Database
+**Read (Gel available):**
+CLI Command → KbClient.read() → GelStore.loadArea() → Gel Database
 
-**Read Operation Flow (Gel down)**:
-CLI Command → KbClient → SqliteCacheStore → SQLite Cache (with staleness warning)
+**Read (Gel down):**
+CLI Command → KbClient.read() → Gel unavailable → SqliteCacheStore.loadArea() → SQLite Cache (staleness warning)
 
-### Scalability Considerations
+### Key Design Decisions
 
-- Multiple kb CLI instances can run concurrently (each with own SQLite cache)
-- Gel provides built-in GraphQL API for external tool integration
-- JSONL export enables migration and cross-system knowledge sharing
-- Audit logging supports compliance and change tracking requirements
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Source of truth | Gel (PostgreSQL) | Corporate KB needs ACID, concurrency, access control |
+| Offline reads | SQLite cache | Degraded mode with staleness warning |
+| Offline writes | Fail with error | No WAL — edge case doesn't justify distributed systems complexity |
+| Audit trail | Decorator pattern | AuditedStore wraps GelStore, cannot be bypassed |
+| Entry types | Polymorphic | Fact, Decision, Gotcha, Pattern, Link as separate Gel types |
+| Interface split | Reader / Writer / GraphQuerier | Type system prevents accidental writes to cache |
