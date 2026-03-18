@@ -246,19 +246,113 @@ Allow and encourage multi-line entry text for complex topics that don't fit a si
 
 ---
 
+## System Impact Analysis
+
+The proposed solutions affect a rendering pipeline that is consumed across the entire mykb system. Any change to `renderEntryLine()` or `renderMarkdown()` ripples through 17 call sites in 9 source files and breaks 50+ test assertions.
+
+### Rendering consumers
+
+| Consumer | Function Used | Tier | Token-Limited |
+|----------|--------------|------|---------------|
+| CLI `kb load` | `renderMarkdown()` | — | No |
+| CLI `kb search` | `renderMarkdown()` | — | No |
+| CLI `kb stale` | `renderMarkdown()` | — | No |
+| CLI `kb load --json` | `renderJson()` | — | No |
+| CLI `kb list` | `renderAreaIndex()` | — | No |
+| CLI `kb export agents-md` | `renderAreaIndex()` | — | No |
+| CLI `kb work start/show` | `renderWorkspace()` | — | No |
+| Tool: `kb_load` | `renderMarkdown()` | 3 | No |
+| Tool: `kb_search` | `renderMarkdown()` | 3 | No |
+| Tool: `kb_list` | `renderAreaIndex()` | 1 | No |
+| `/kb` command handler | `renderMarkdown()` | 3 | No |
+| Context injection | `renderContextBlock()` | 2 | **Yes (2000 tokens)** |
+| Session start (areas) | `renderAreaIndex()` | 1 | No |
+| Session start (workspace) | `renderWorkspace()` | 1 | No |
+
+### The token budget mismatch (critical)
+
+The scorer estimates token cost per entry as `entry.text.length / 4` (scorer.ts:162). This estimate does **not** account for any rendering overhead:
+
+- The `- ` bullet prefix (2 chars)
+- Tag rendering: ` #tag1 #tag2` (variable)
+- Provenance: ` (verified:2026-03-15)` (23 chars)
+- Section headers: `## area (Active)\n` (20+ chars, once per area)
+- XML wrapper: `<mykb-context>...</mykb-context>` (31 chars)
+
+Currently this undercount is small — maybe 10-15% of actual rendered size. But if we add type prefixes (`[PATTERN] `, `[GOTCHA] `, `[DECISION] `), type section headers (`### Patterns\n`), provenance markers for all statuses, and decision rationale lines, the rendering overhead could reach 30-40% of total output. The scorer would select entries believing they fit in 2000 tokens, but the rendered output would actually consume 2600-2800 tokens.
+
+**This means every proposed solution that adds rendering metadata must also update the token estimation formula.** The scorer and renderer are currently decoupled — the scorer estimates from raw entry text, the renderer produces final output independently. This decoupling is the root fragility.
+
+### Test blast radius
+
+| Test file | Cases affected | What they assert |
+|-----------|---------------|-----------------|
+| `tests/core/render.test.ts` | 24 | Exact markdown format: `"- fact one #ts #dev"` |
+| `tests/cli/cli.test.ts` | ~15 | Output contains `"##"`, specific content strings |
+| `tests/tools/kb-load.test.ts` | 4 | Entry content present in markdown |
+| `tests/tools/kb-search.test.ts` | 2 | Matching entries in markdown |
+| `tests/extension/kb-command.test.ts` | 4 | Entry text in injected markdown |
+| `tests/extension/context.test.ts` | 1 | `<mykb-context>` present, content injected |
+| `tests/extension/session.test.ts` | 1 | `<mykb-workspace>` tags |
+| `tests/extension/scorer.test.ts` | 1 | Token calculation = `totalChars / 4` |
+
+The render.test.ts assertions are the most fragile — they check exact string format. Any prefix, header, or grouping change breaks them all.
+
+### Per-solution impact
+
+**Solution 1 (Type-Grouped Rendering):**
+- Adds `### Patterns`, `### Gotchas`, etc. section headers → increases token consumption ~5-10%
+- Adds `[PATTERN]`, `[GOTCHA]` prefixes → ~8-12 chars per non-fact entry
+- Reorders entries (patterns first) → breaks all test assertions on entry order
+- Must update: `renderEntryLine()`, `renderMarkdown()`, `renderContextBlock()`, scorer token estimate, 30+ tests
+
+**Solution 2 (Provenance-Aware Rendering):**
+- Adds `[verified]`, `[stale]` markers → ~10-12 chars per entry
+- Reorders within groups → breaks order-dependent test assertions
+- Must update: `renderEntryLine()`, scorer token estimate, 20+ tests
+
+**Solution 3 (Relevance-Ranked Loading):**
+- Changes entry order, not rendering format → no token impact
+- Must update: `scorer.ts`, `db.ts`, `knowledge-store.ts`, scorer tests
+- **Least disruptive to rendering pipeline** — affects the loading layer, not the display layer
+
+**Solution 4 (Tag-Clustered Rendering):**
+- Adds tag group headers → increases token consumption ~5-8%
+- New grouping logic in `renderMarkdown()` and `renderContextBlock()`
+- Must update: render functions, scorer token estimate, 30+ tests
+
+**Solution 5 (Composite Entry Support):**
+- Multi-line rendering with indentation → moderate token increase per entry
+- Only affects entries that use multi-line text (opt-in)
+- Must update: `renderEntryLine()`, tests for that function
+
+### Mitigation strategies
+
+1. **Decouple token estimation from rendering.** The scorer should estimate tokens from the *rendered* output, not raw entry text. Either render first then count, or use a `renderTokenEstimate()` function that mirrors the render logic.
+
+2. **Tier-specific rendering.** The Tier 2 context injection (token-limited) could use a compact renderer, while Tier 3 (`/kb` command, no limit) and CLI use a rich renderer. This avoids the token budget problem for the most constrained path.
+
+3. **Feature-flag the format change.** Add a `renderFormat: 'flat' | 'grouped'` option to render functions. Migrate tests incrementally. Default to `flat` initially, switch to `grouped` after validation.
+
+4. **Render-then-budget approach.** Instead of estimating tokens per entry and selecting, render all entries, then truncate the rendered output to fit the budget. This ensures the token count is always accurate.
+
+---
+
 ## Recommended Implementation Order
 
-| Priority | Solution | Effort | Impact | Rationale |
-|----------|----------|--------|--------|-----------|
-| 1 | Type-Grouped Rendering | Low | High | Biggest bang for least effort. Patterns/gotchas surface immediately. |
-| 2 | Provenance-Aware Rendering | Low | Medium | Quick win, improves AI confidence weighting. Pairs with Solution 1. |
-| 3 | Composite Entry Support | Medium | High | Reduces entry sprawl. Consolidates scattered facts into authoritative patterns. |
-| 4 | Tag-Clustered Rendering | Medium | High | Creates semantic structure. Can combine with type grouping. |
-| 5 | Relevance-Ranked Loading | High | Very High | Most impactful long-term but needs FTS5 integration work in scorer. |
+| Priority | Solution | Effort (revised) | Impact | Rationale |
+|----------|----------|-------------------|--------|-----------|
+| 0 | Decouple token estimation from rendering | Low | Critical | **Prerequisite** for all rendering changes. Without this, any format change silently breaks Tier 2 injection. |
+| 1 | Relevance-Ranked Loading | Medium | Very High | Changes loading order, not rendering format. Least disruptive to the rendering pipeline. Highest impact on the original problem. |
+| 2 | Tier-specific rendering | Medium | High | Enables rich rendering for CLI/Tier 3 without blowing Tier 2 token budget. Unblocks Solutions 3-5. |
+| 3 | Type-Grouped Rendering | Medium | High | Now medium effort due to 30+ test updates and token estimation changes. Still high value for surfacing patterns/gotchas. |
+| 4 | Provenance-Aware Rendering | Medium | Medium | Pairs with Solution 3. Token overhead manageable with tier-specific rendering in place. |
+| 5 | Composite Entry Support | Medium | High | Reduces entry sprawl. Mostly a knowledge authoring practice. |
+| 6 | Tag-Clustered Rendering | High | High | Most complex grouping logic. Best done after type-grouped rendering is stable. |
 
-Solutions 1 and 2 can be implemented together as a single change: type-grouped rendering with provenance markers.
+**Revised sequencing rationale:** The original report rated type-grouped rendering as "low effort" — this was wrong. It touches the most fragile part of the system (renderEntryLine, consumed by 17 call sites, asserted by 50+ tests) and requires synchronized updates to the scorer's token estimation. Relevance-ranked loading, by contrast, operates in the loading layer and leaves rendering untouched.
 
-Solutions 1 and 4 can be combined for maximum structure: group by type first, then by tag within each type. This gives both hierarchical and semantic structure.
+The safest path is: fix the token estimation coupling first (Priority 0), then improve entry ordering via relevance ranking (Priority 1), then introduce tier-specific rendering to decouple the constrained Tier 2 path from the unconstrained CLI/Tier 3 paths (Priority 2), and only then change the rendering format itself (Priorities 3-6).
 
 ---
 
