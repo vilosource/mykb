@@ -1,143 +1,87 @@
 # Graph Backend — Design Document
 
 **Date:** 2026-03-18
-**Status:** Draft — Iteration 2
+**Status:** Draft — Iteration 3
 **Prerequisite:** [graph-backend-MOTIVATION.md](./graph-backend-MOTIVATION.md)
 
 ---
 
-## Design Decisions To Resolve
+## Trajectory
 
-These are the hard architectural questions identified during review. Each
-must have a clear answer before implementation begins.
+mykb is a personal knowledge base today. It is being designed to become a
+corporate knowledge base. The architecture must support:
+
+- **Multi-user** — multiple humans and AI agents reading/writing concurrently
+- **Access control** — who can see/edit which areas
+- **Audit trail** — who changed what, when, and why
+- **API access** — GraphQL endpoint for external tools and services
+- **Scale** — thousands of areas, tens of thousands of entries, millions of relationships
+- **Concurrency** — no single-writer bottleneck (SQLite BUSY is already a known issue)
+
+This rules out SQLite as the long-term query engine. PostgreSQL via Gel
+is the right foundation.
+
+---
+
+## Design Decisions
 
 ### DD-1: Source of truth
 
-**Question:** Does JSONL remain the source of truth, or does Gel become it?
+**Question:** Where does the canonical data live?
 
-**The tension:** Explicit relationships (`kb relate A B`) have no natural
-JSONL representation. If JSONL is source of truth, `kb rebuild` loses
-relationships. If Gel is source of truth, we lose git-tracked diffs and
-offline operation.
+**Context:** Iteration 2 concluded "JSONL stays source of truth, Gel is a
+derived view." That was designed for a single-user personal tool. A
+corporate KB changes the calculus:
 
-**Research findings:**
+- Multiple users writing concurrently → need ACID transactions
+- Access control → need row/object-level permissions
+- Audit trail → need server-side change tracking
+- API access → need a live queryable store, not files on one person's disk
+- JSONL on disk is one user's filesystem — it cannot be the shared source
+  of truth for a team
 
-1. **EdgeDB is now Gel** (renamed Feb 2025, same tool). No embedded mode —
-   requires a running server process. Not suitable as the sole store for a
-   portable, offline-capable tool.
+**Decision: Gel (PostgreSQL) is the source of truth.**
 
-2. **Graphiti (Zep)** uses event sourcing for knowledge graphs: append-only
-   episode log → materialized graph. Episodes are source of truth. Graph
-   is a derived projection that can be rebuilt. Closest architectural match
-   to mykb's JSONL + derived index pattern.
-
-3. **Obsidian/Logseq** keep files as source of truth. Graph is computed at
-   runtime from `[[wiki-links]]`. Never persisted separately.
-
-4. **N-Triples** (RDF): one triple per line (`<subject> <predicate> <object>`),
-   git-friendly, line-oriented. Proves that graph relationships CAN be
-   stored in a flat, append-only, diffable format.
-
-5. **No system has fully solved portable + graph + git + offline.** The
-   closest pattern: flat files as source of truth, graph materialized on
-   demand into an optional query engine.
-
-**The key insight:** The original tension ("relationships can't live in
-JSONL") is false. Relationships CAN be stored in JSONL — either inline
-on entries or in a dedicated relationships file. The graph DB is then a
-materialized view, not a source of truth. This is the same pattern mykb
-already uses with SQLite.
-
-**Options (revised):**
-
-| Option | Pros | Cons |
-|--------|------|------|
-| ~~A: JSONL only~~ | ~~Relationships lost on rebuild~~ | ~~Rejected — original framing was wrong~~ |
-| ~~B: Gel becomes source of truth~~ | ~~Single store~~ | ~~Rejected — Gel requires server, no offline, no git~~ |
-| **E: JSONL with relationships + Gel as materialized view** | Git-friendly, offline, portable. Gel adds graph queries when available. No data loss on rebuild. | Relationships file is global (cross-area). Gel is optional infrastructure. |
-
-**Decision: Option E.**
-
-JSONL remains the sole source of truth. Relationships are stored in JSONL.
-Gel materializes a graph index for fast traversal queries, exactly like
-SQLite materializes a text index for fast search queries. Both are
-rebuildable from JSONL. Both are optional.
+JSONL becomes the portable import/export format:
+- `kb export` — dump the graph to JSONL for git archival, migration, or backup
+- `kb import` — load JSONL into Gel (bootstrapping, migration from v1)
+- JSONL exports are snapshots, not the live source of truth
 
 ```
-JSONL files (source of truth, git-tracked)
-  ├──> entries: areas/<id>/facts.jsonl, decisions.jsonl, ...
-  ├──> relationships: relationships.jsonl (global, cross-area)
+Gel on PostgreSQL (source of truth)
   │
-  ├──> SQLite FTS5 (derived, rebuildable) → kb search
-  └──> Gel (derived, rebuildable, optional) → kb traverse, kb related
+  ├── All reads and writes go here
+  ├── Relationships are native graph edges
+  ├── Full-text search via PostgreSQL tsvector
+  ├── Access control via Gel's auth model
+  ├── Audit trail via trigger-based change log
+  │
+  └──> JSONL export (portable, git-archivable)
+       └── kb export → ~/.mykb/export/
+           ├── areas/<id>/*.jsonl
+           └── relationships.jsonl
 ```
 
-**Relationship storage in JSONL:**
+**Migration path from v1:**
+1. Deploy Gel instance
+2. `kb import ~/.mykb/` — loads all JSONL into Gel
+3. Run relationship extractor on imported entries
+4. Verify: `kb export` produces equivalent JSONL
+5. Switch `kb` CLI to use Gel backend
+6. JSONL files become archive — no longer written to directly
 
-A global `~/.mykb/relationships.jsonl` file. Each line is one relationship:
-
-```jsonl
-{"id":"r001","from":"f001","from_area":"stark-picking","to":"d003","to_area":"infra-vm","type":"references","source":"explicit","confidence":1.0,"created":"2026-03-18","updated":"2026-03-18"}
-{"id":"r002","from":"area:stark-picking","to":"area:infra-vm","type":"linked_areas","source":"extracted","confidence":0.9,"created":"2026-03-18","updated":"2026-03-18"}
-```
-
-Why global, not per-area:
-- Relationships are cross-area by nature (area A → area B)
-- Per-area files would duplicate cross-area relationships or arbitrarily
-  assign them to one side
-- One file is simpler, diffs cleanly, compacts easily
-
-Why this works:
-- Append-only (same as entry JSONL)
-- Git-friendly (one line per relationship, clean diffs)
-- `kb compact --relationships` removes superseded/deleted relationships
-- `kb rebuild` reads entries JSONL + relationships JSONL → rebuilds
-  both SQLite and Gel
+**Offline / degraded mode:** The CLI needs network access to Gel. For
+offline scenarios, a read-only SQLite cache can be maintained locally
+(same as today) for `kb load` and `kb search`. Writes queue locally and
+sync on reconnect.
 
 **Status:** Resolved.
 
 ---
 
-### DD-1a: Gel vs alternatives for the graph materialized view
-
-**Question:** Now that Gel is just a materialized view (not source of
-truth), is it still the right choice? Or is something lighter sufficient?
-
-**Options:**
-
-| Option | Query language | Server required | Offline | Fit |
-|--------|---------------|-----------------|---------|-----|
-| **Gel (EdgeDB)** | EdgeQL + GraphQL | Yes (PostgreSQL) | No | Powerful but heavy for a derived index |
-| **SQLite + relationship tables** | SQL + recursive CTEs | No (embedded) | Yes | Already have SQLite. Relationship queries are ugly but work. |
-| **FalkorDBLite** | Cypher | No (embedded) | Yes | Young project, but embedded graph with real query language |
-| **In-memory graph (custom)** | TypeScript API | No | Yes | Built on startup from JSONL, no persistence needed |
-
-Since Gel is now optional infrastructure (not source of truth), the bar
-is different. The question is: do graph queries justify running a
-PostgreSQL server?
-
-For a personal knowledge base with ~1000 entries and ~5000 relationships:
-- SQLite with a `relationships` table and recursive CTEs may be sufficient
-- An in-memory graph built on `kb rebuild` from JSONL is another option
-- Gel becomes relevant if/when the graph grows or external tools need
-  the GraphQL API
-
-**Decision:** Deferred. Start with SQLite relationship tables (zero new
-infrastructure). Add Gel later if graph query complexity justifies it.
-The architecture supports both because the source of truth is JSONL
-regardless.
-
-**Status:** Resolved (start with SQLite, Gel is a future upgrade).
-
----
-
 ### DD-2: Entry type modeling
 
-**Question:** Single `Entry` type with nullable fields, or polymorphic subtypes?
-
-**Decision:** Polymorphic subtypes. EdgeDB's type system supports this
-natively. A single wide Entry with `why: str | null` on every fact is the
-wrong model for a graph-relational DB.
+**Decision:** Polymorphic subtypes. Gel's type system supports this natively.
 
 ```esdl
 abstract type Entry extending Timestamped {
@@ -145,16 +89,28 @@ abstract type Entry extending Timestamped {
   required area: Area;
   required text: str;
   required zone: ZoneType { default := ZoneType.active; };
+
+  # Provenance
   prov_status: ProvenanceStatus { default := ProvenanceStatus.unverified; };
   prov_date: datetime;
   prov_source: str;
+
+  # Relationships
   multi tags: Tag;
   multi references: Entry {
     created: datetime { default := datetime_current(); };
-    source: str;       # 'explicit' | 'extracted'
+    source: str { default := 'explicit'; };
     confidence: float32 { default := 1.0; };
   };
   multi supersedes: Entry;
+
+  # Computed backlinks
+  multi referenced_by := .<references[is Entry];
+  multi superseded_by := .<supersedes[is Entry];
+
+  # Audit
+  created_by: User;
+  updated_by: User;
 }
 
 type Fact extending Entry {}
@@ -183,15 +139,13 @@ type Link extending Entry {
 
 ### DD-3: Relationship metadata
 
-**Question:** What metadata do relationships carry?
-
-**Decision:** Link properties on EdgeDB edges:
+**Decision:** Link properties on Gel edges:
 
 | Property | Type | Purpose |
 |----------|------|---------|
 | `created` | datetime | When the relationship was established |
-| `source` | str | `'explicit'` (human via `kb relate`) or `'extracted'` (parsed from text) |
-| `confidence` | float32 | 1.0 for explicit, 0.0-1.0 for extracted based on pattern strength |
+| `source` | str | `'explicit'` (human/agent via `kb relate`) or `'extracted'` (parsed from text) |
+| `confidence` | float32 | 1.0 for explicit, 0.0-1.0 for extracted |
 
 Bidirectionality: `references` is directional (A cites B). `linked_areas`
 is directional (area A references area B). Backlinks are computed properties
@@ -203,21 +157,23 @@ is directional (area A references area B). Backlinks are computed properties
 
 ### DD-4: Degraded mode
 
-**Question:** What happens when EdgeDB is unavailable?
+**Question:** What happens when Gel is unavailable?
 
-**Decision:** mykb must function without EdgeDB. Degraded mode:
+**Decision:** Core read operations fall back to a local SQLite cache.
+Write operations queue locally and sync on reconnect.
 
-| Command | EdgeDB up | EdgeDB down |
-|---------|-----------|-------------|
-| `kb add/update/delete` | Writes both stores | Writes JSONL+SQLite only, logs warning |
-| `kb load` | Either store | JSONL+SQLite |
-| `kb search` | SQLite FTS5 (always) | SQLite FTS5 |
-| `kb traverse` | EdgeDB | Error: "graph backend unavailable" |
-| `kb related` | EdgeDB | Error |
-| `kb impact` | EdgeDB | Error |
-| `kb tags --co-occur` | EdgeDB | Error |
+| Command | Gel up | Gel down |
+|---------|--------|----------|
+| `kb add/update/delete` | Writes to Gel | Queues to local write-ahead log, syncs on reconnect |
+| `kb load` | Gel | Local SQLite cache (may be stale) |
+| `kb search` | Gel (PostgreSQL FTS) | Local SQLite FTS5 cache |
+| `kb traverse` | Gel | Unavailable (graph queries need Gel) |
+| `kb related` | Gel | Unavailable |
+| `kb impact` | Gel | Unavailable |
+| `kb relate` | Writes to Gel | Queues locally |
 
-On reconnect, a reconciliation pass syncs missed writes from JSONL to EdgeDB.
+The local SQLite cache is refreshed periodically when Gel is available
+(`kb sync`). This ensures basic read operations work offline.
 
 **Status:** Resolved.
 
@@ -225,28 +181,23 @@ On reconnect, a reconciliation pass syncs missed writes from JSONL to EdgeDB.
 
 ### DD-5: Search strategy
 
-**Question:** How does search work with the graph backend?
+**Decision:** PostgreSQL's built-in full-text search (`tsvector` +
+`tsquery`) replaces SQLite FTS5 as the primary search engine. Gel exposes
+this through its query language.
 
-**Decision:** SQLite handles BOTH full-text search AND graph queries.
-Per DD-1/DD-1a, we're starting with SQLite (not Gel). SQLite gets a
-new `relationships` table alongside the existing FTS5 index:
+For degraded/offline mode, the local SQLite cache maintains an FTS5 index
+as a fallback.
 
 ```
-JSONL (source of truth, git-tracked)
-  ├──> entries: areas/<id>/*.jsonl
-  └──> relationships: relationships.jsonl
-           │
-           └──> SQLite (derived, rebuildable)
-                  ├──> entries table + FTS5 index (existing) → kb search
-                  └──> relationships table (new) → kb traverse, kb related
+Gel on PostgreSQL (primary)
+  ├── Graph queries: EdgeQL
+  ├── Full-text search: PostgreSQL tsvector
+  ├── GraphQL API: built-in
+  │
+  └──> Local SQLite cache (offline fallback)
+       ├── Entries table + FTS5 (for kb load, kb search)
+       └── Refreshed via kb sync
 ```
-
-Single derived store. No new infrastructure. `kb rebuild` rebuilds
-everything from JSONL.
-
-If graph queries outgrow SQLite's capabilities, Gel can be added as an
-additional materialized view later — the JSONL source of truth doesn't
-change.
 
 **Status:** Resolved.
 
@@ -254,21 +205,14 @@ change.
 
 ### DD-6: Graph traversal constraints
 
-**Question:** How do we prevent unbounded traversal on cyclic graphs?
-
-**Decision:**
-
-- Default depth limit: 2
-- Maximum depth limit: 5
-- Edge-type filtering required for traversal queries
-- Visited-node tracking to break cycles
-- Return an adjacency list (nodes + edges), not a recursive tree
+**Decision:** Same as iteration 2 — depth limits, edge-type filtering,
+cycle protection, adjacency list return format.
 
 ```typescript
 export type TraversalOptions = {
-  depth?: number;            // default 2, max 5
-  edgeTypes?: RelationType[]; // which relationship types to follow
-  zones?: Zone[];            // filter by entry zone
+  depth?: number;              // default 2, max 5
+  edgeTypes?: RelationType[];
+  zones?: Zone[];
 };
 
 export type TraversalResult = {
@@ -280,7 +224,7 @@ export type TraversalResult = {
     source: 'explicit' | 'extracted';
     confidence: number;
   }>;
-  truncated: boolean;        // true if depth limit was hit
+  truncated: boolean;
 };
 ```
 
@@ -290,20 +234,8 @@ export type TraversalResult = {
 
 ### DD-7: Relationship extraction reliability
 
-**Question:** How do we handle false positives in auto-extracted relationships?
-
-**Decision:** Three-tier extraction:
-
-| Tier | Pattern | Confidence | Action |
-|------|---------|------------|--------|
-| High | `area:<known-area-id>` | 0.95 | Auto-create edge |
-| Medium | `UPPERCASE-NNN` matching a known entry ID | 0.7 | Auto-create edge with medium confidence |
-| Low | `UPPERCASE-NNN` not matching known entry | 0.0 | Ignore — likely JIRA ticket or external ref |
-
-- Only extract relationships to **known** entry IDs and area IDs
-- Never guess — if the target doesn't exist in the DB, don't create an edge
-- `#tag` extraction uses the existing tag field, not text parsing (tags are already structured)
-- Explicit `kb relate` always creates confidence 1.0 edges
+**Decision:** Same as iteration 2 — three-tier extraction with confidence
+scores. Only extract to known IDs. Explicit `kb relate` = confidence 1.0.
 
 **Status:** Resolved.
 
@@ -311,20 +243,7 @@ export type TraversalResult = {
 
 ### DD-8: JournalEntry ownership
 
-**Question:** How are journal entries lifecycle-managed?
-
-**Decision:** `JournalEntry` has a required back-link to `Workspace`.
-Deleting a workspace cascades to its journal entries.
-
-```esdl
-type JournalEntry extending Timestamped {
-  required workspace: Workspace {
-    on target delete delete source;
-  };
-  required date: cal::local_date;
-  required text: str;
-}
-```
+**Decision:** Required back-link to Workspace with cascade delete.
 
 **Status:** Resolved.
 
@@ -332,94 +251,132 @@ type JournalEntry extending Timestamped {
 
 ### DD-9: Backup and restore
 
-**Question:** How is the graph data backed up?
+**Decision:** Gel (PostgreSQL) is backed up via:
+- `pg_dump` / `pg_restore` — standard PostgreSQL backup
+- `kb export` — JSONL snapshot for human-readable archive and git
+- For managed Gel Cloud: automatic backups included
 
-**Decision:** JSONL is the source of truth (DD-1). Backup = git.
-Relationships live in `relationships.jsonl`, so they're git-tracked like
-everything else. `kb rebuild` regenerates SQLite (entries + relationships
-tables) from JSONL at any time.
-
-No new backup mechanism needed. The existing `kb save` → git commit flow
-covers entries AND relationships.
+JSONL exports can be committed to git for historical snapshots, but they
+are not the live source of truth.
 
 **Status:** Resolved.
 
 ---
 
-## SQLite Relationship Schema
+### DD-10: Multi-tenancy and access control
 
-The immediate implementation. Extends the existing `kb.db` with a
-relationships table. Rebuilt from `relationships.jsonl` by `kb rebuild`.
+**Question:** How do multiple users access the KB with different permissions?
 
-```sql
--- New table in kb.db (alongside existing entries + FTS5 tables)
-CREATE TABLE relationships (
-  id          TEXT PRIMARY KEY,
-  from_id     TEXT NOT NULL,    -- entry_id or 'area:<slug>'
-  from_area   TEXT NOT NULL,    -- area slug of the source
-  to_id       TEXT NOT NULL,    -- entry_id or 'area:<slug>'
-  to_area     TEXT NOT NULL,    -- area slug of the target
-  type        TEXT NOT NULL,    -- 'references' | 'supersedes' | 'linked_areas'
-  source      TEXT NOT NULL DEFAULT 'explicit',  -- 'explicit' | 'extracted'
-  confidence  REAL NOT NULL DEFAULT 1.0,
-  created     TEXT NOT NULL,
-  updated     TEXT NOT NULL
-);
+**Decision:** Gel's built-in access policies. Define roles and scoped
+access at the object level.
 
-CREATE INDEX idx_rel_from ON relationships(from_id);
-CREATE INDEX idx_rel_to ON relationships(to_id);
-CREATE INDEX idx_rel_type ON relationships(type);
-CREATE INDEX idx_rel_from_area ON relationships(from_area);
-CREATE INDEX idx_rel_to_area ON relationships(to_area);
+```esdl
+# Access control types
+type User extending Timestamped {
+  required email: str { constraint exclusive; };
+  required name: str;
+  multi roles: Role;
+}
+
+type Role {
+  required name: str { constraint exclusive; };
+  multi areas: Area;            # areas this role can access
+  required can_read: bool { default := true; };
+  required can_write: bool { default := false; };
+  required can_admin: bool { default := false; };
+}
+
+# Access policy on Entry
+abstract type Entry extending Timestamped {
+  # ... (existing fields) ...
+
+  access policy allow_read
+    allow select
+    using (
+      global current_user.roles.areas ?= .area
+      and global current_user.roles.can_read = true
+    );
+
+  access policy allow_write
+    allow insert, update, delete
+    using (
+      global current_user.roles.areas ?= .area
+      and global current_user.roles.can_write = true
+    );
+}
 ```
 
-### Traversal query (SQLite recursive CTE)
+For the personal KB phase (now), a single user with admin on all areas.
+Corporate phase adds roles per team/project.
 
-"Find all entries connected to entry X within depth 2":
-
-```sql
-WITH RECURSIVE traverse(id, area, depth, path) AS (
-  -- Seed: the starting entry
-  SELECT to_id, to_area, 1, from_id || '->' || to_id
-  FROM relationships
-  WHERE from_id = :start_id AND type IN (:edge_types)
-  UNION
-  -- Recurse: follow edges from discovered entries
-  SELECT r.to_id, r.to_area, t.depth + 1, t.path || '->' || r.to_id
-  FROM relationships r
-  JOIN traverse t ON r.from_id = t.id
-  WHERE t.depth < :max_depth
-    AND r.type IN (:edge_types)
-    AND r.to_id NOT IN (SELECT id FROM traverse)  -- cycle protection
-)
-SELECT DISTINCT e.*
-FROM traverse t
-JOIN entries e ON e.id = t.id;
-```
-
-Not as clean as Cypher or EdgeQL, but it works for the current scale
-(~1000 entries, ~5000 relationships) with no new infrastructure.
+**Status:** Resolved.
 
 ---
 
-## Gel Schema (Future)
+### DD-11: Audit trail
 
-If graph query complexity outgrows SQLite, Gel (formerly EdgeDB) can be
-added as an additional materialized view. This schema uses polymorphic
-types as decided in DD-2.
+**Question:** How do we track who changed what?
+
+**Decision:** A change log table with trigger-based population.
+
+```esdl
+type ChangeLog extending Timestamped {
+  required action: str;           # 'create' | 'update' | 'delete'
+  required target_type: str;      # 'Entry' | 'Area' | 'Workspace' | 'Relationship'
+  required target_id: str;
+  user: User;
+  agent: str;                     # agent identifier if change was by AI
+  previous_value: json;           # snapshot before change (for updates/deletes)
+  new_value: json;                # snapshot after change (for creates/updates)
+}
+```
+
+Every write operation generates a ChangeLog entry. This provides:
+- Full audit trail for compliance
+- "Who changed this?" queries
+- Undo capability (restore from `previous_value`)
+- Agent attribution (which AI agent modified which entries)
+
+**Status:** Resolved.
+
+---
+
+## Gel Schema (Complete)
 
 ```esdl
 module default {
+
+  # --- Scalar types ---
+
+  scalar type EntryType extending enum<fact, decision, gotcha, pattern, link>;
+  scalar type ZoneType extending enum<active, established, archive>;
+  scalar type ProvenanceStatus extending enum<verified, unverified, stale, expires>;
+  scalar type ResolutionStatus extending enum<resolved, mitigated, wontfix>;
+
+  # --- Abstract types ---
 
   abstract type Timestamped {
     required created: datetime { default := datetime_current(); };
     required updated: datetime { default := datetime_current(); };
   }
 
-  scalar type EntryType extending enum<fact, decision, gotcha, pattern, link>;
-  scalar type ZoneType extending enum<active, established, archive>;
-  scalar type ProvenanceStatus extending enum<verified, unverified, stale, expires>;
-  scalar type ResolutionStatus extending enum<resolved, mitigated, wontfix>;
+  # --- Identity and access ---
+
+  type User extending Timestamped {
+    required email: str { constraint exclusive; };
+    required name: str;
+    multi roles: Role;
+  }
+
+  type Role {
+    required name: str { constraint exclusive; };
+    multi areas: Area;
+    required can_read: bool { default := true; };
+    required can_write: bool { default := false; };
+    required can_admin: bool { default := false; };
+  }
+
+  # --- Knowledge graph ---
 
   type Area extending Timestamped {
     required slug: str { constraint exclusive; };
@@ -431,6 +388,8 @@ module default {
       created: datetime { default := datetime_current(); };
       source: str { default := 'explicit'; };
     };
+
+    # Computed backlinks
     multi entries := .<area[is Entry];
     multi linked_from := .<linked_areas[is Area];
     multi workspaces := .<areas[is Workspace];
@@ -441,9 +400,13 @@ module default {
     required area: Area;
     required text: str;
     required zone: ZoneType { default := ZoneType.active; };
+
+    # Provenance
     prov_status: ProvenanceStatus { default := ProvenanceStatus.unverified; };
     prov_date: datetime;
     prov_source: str;
+
+    # Relationships
     multi tags: Tag;
     multi references: Entry {
       created: datetime { default := datetime_current(); };
@@ -451,21 +414,31 @@ module default {
       confidence: float32 { default := 1.0; };
     };
     multi supersedes: Entry;
+
+    # Computed backlinks
     multi referenced_by := .<references[is Entry];
     multi superseded_by := .<supersedes[is Entry];
+
+    # Audit
+    created_by: User;
+    updated_by: User;
   }
 
   type Fact extending Entry {}
+
   type Decision extending Entry {
     why: str;
     rejected: str;
     context: str;
   }
+
   type Gotcha extending Entry {
     failed: bool { default := false; };
     resolution: ResolutionStatus;
   }
+
   type Pattern extending Entry {}
+
   type Link extending Entry {
     required url: str;
   }
@@ -475,6 +448,8 @@ module default {
     multi entries := .<tags[is Entry];
     multi areas := .<tags[is Area];
   }
+
+  # --- Workspaces ---
 
   type Workspace extending Timestamped {
     required slug: str { constraint exclusive; };
@@ -487,6 +462,7 @@ module default {
     jira: str;
     wiki: str;
     multi repos: str;
+
     multi journal := .<workspace[is JournalEntry];
   }
 
@@ -497,16 +473,27 @@ module default {
     required date: cal::local_date;
     required text: str;
   }
+
+  # --- Audit ---
+
+  type ChangeLog extending Timestamped {
+    required action: str;
+    required target_type: str;
+    required target_id: str;
+    user: User;
+    agent: str;
+    previous_value: json;
+    new_value: json;
+  }
 }
 ```
 
 ---
 
-## Interface (Draft)
+## GraphStore Interface
 
 ```typescript
 export type RelationType = 'references' | 'supersedes' | 'linked_areas';
-
 export type RelationSource = 'explicit' | 'extracted';
 
 export type TraversalOptions = {
@@ -527,7 +514,7 @@ export type TraversalResult = {
   truncated: boolean;
 };
 
-export interface GraphStore {
+export interface GraphStore extends KnowledgeStore {
   // Relationship management
   relate(fromId: string, toId: string, type: RelationType): void;
   unrelate(fromId: string, toId: string, type: RelationType): void;
@@ -538,24 +525,69 @@ export interface GraphStore {
   impact(id: string): TraversalResult;
   tagCoOccurrence(tag: string): Array<{ tag: string; count: number }>;
 
-  // Health
+  // Import/export
+  exportJsonl(path: string): void;
+  importJsonl(path: string): void;
+
+  // Health and sync
   isAvailable(): Promise<boolean>;
+  syncToCache(): Promise<void>;    // refresh local SQLite cache
 }
 ```
 
 ---
 
-## Open — Blocking
+## Deployment
 
-None. All design decisions resolved. Ready for implementation planning.
+### Personal KB (now)
+
+```
+Developer workstation
+  └── docker compose up
+        ├── gel (PostgreSQL)     ← persistent volume
+        └── (optional) gel-ui   ← admin dashboard
+```
+
+Single `docker compose` with a persistent volume. Zero ops.
+
+### Corporate KB (future)
+
+```
+Infrastructure
+  ├── Gel Cloud or self-hosted Gel on managed PostgreSQL
+  ├── GraphQL API exposed to internal network
+  ├── Auth via SSO / OIDC
+  └── Multiple kb CLI instances + AI agents connecting
+```
+
+The same Gel schema and API. Only the deployment changes.
+
+---
+
+## Migration from v1
+
+| Step | Action | Reversible |
+|------|--------|------------|
+| 1 | Deploy Gel instance (`docker compose up`) | Yes — remove container |
+| 2 | `kb import ~/.mykb/` — load all JSONL into Gel | Yes — Gel is empty, just reimport |
+| 3 | Run relationship extractor on imported entries | Yes — delete extracted edges |
+| 4 | `kb export` — verify round-trip produces equivalent JSONL | N/A — validation only |
+| 5 | Switch kb CLI to Gel backend (config change) | Yes — switch back to JSONL |
+| 6 | Archive `~/.mykb/` JSONL files (no longer written to) | Yes — re-enable JSONL backend |
+
+v1 JSONL backend is not removed — it stays as a fallback and for the
+local offline cache.
+
+---
 
 ## Open — Non-blocking
 
-1. Performance benchmarks: SQLite recursive CTEs at mykb scale (~1000 entries, ~5000 edges)
-2. Gel deployment model if/when SQLite is outgrown (local vs Docker vs cloud)
-3. GraphQL exposure — only relevant if Gel is added
-4. Relationship visualization (`kb graph` output format — Mermaid? DOT? interactive?)
-5. Should `kb relate` be a separate command or integrated into `kb add` with `--references` flag?
+1. Gel deployment model — Docker Compose for now, managed for corporate
+2. Relationship visualization — `kb graph` output format (Mermaid? DOT?)
+3. `kb relate` UX — separate command or `--references` flag on `kb add`
+4. Offline cache sync frequency and conflict resolution
+5. Agent identity model — how do AI agents authenticate to Gel?
+6. JSONL export scheduling — automatic nightly? manual? git hook?
 
 ---
 
@@ -563,5 +595,6 @@ None. All design decisions resolved. Ready for implementation planning.
 
 | Date | Change |
 |------|--------|
-| 2026-03-18 | Iteration 1: Separated from motivation doc. Addressed review: polymorphic types, relationship metadata, cycle protection, degraded mode, search strategy, JournalEntry ownership, extraction reliability. DD-1 (source of truth) left unresolved. |
-| 2026-03-18 | Iteration 2: Resolved DD-1. Research found: EdgeDB renamed to Gel (no embedded mode), Graphiti event-sourcing pattern, N-Triples as git-friendly graph format. Key insight: relationships CAN live in JSONL. Decision: JSONL stays source of truth with `relationships.jsonl` for graph edges. Gel demoted from primary store to optional future materialized view. SQLite with relationship table is the immediate implementation. Added SQLite schema with recursive CTE traversal. Resolved DD-5 (search) and DD-9 (backup) as consequences of DD-1. All DDs now resolved. |
+| 2026-03-18 | Iteration 1: Separated from motivation doc. Addressed review: polymorphic types, relationship metadata, cycle protection, degraded mode, search strategy, JournalEntry ownership, extraction reliability. DD-1 left unresolved. |
+| 2026-03-18 | Iteration 2: Resolved DD-1 as "JSONL stays source of truth." Research: Gel has no embedded mode, Graphiti event-sourcing pattern, N-Triples. SQLite with relationship table as immediate impl. |
+| 2026-03-18 | Iteration 3: Reversed DD-1. mykb targets corporate KB, not just personal. Multi-user, access control, audit trail, concurrency, and API access require PostgreSQL. Gel becomes source of truth. JSONL becomes import/export format. Added DD-10 (access control), DD-11 (audit trail). PostgreSQL FTS replaces SQLite FTS5. Local SQLite cache for offline fallback. Migration plan from v1. |

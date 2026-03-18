@@ -84,45 +84,64 @@ to the system. The Curator agent discovered this during the bulk curation
 pass — consolidating entries across areas required manual cross-referencing
 that a graph query could have automated.
 
+### Beyond personal use
+
+mykb is a personal KB today, but it is being designed to become a
+**corporate knowledge base**. This means:
+
+- **Multiple users** — humans and AI agents reading/writing concurrently
+- **Multiple vf-agents instances** — Pi coding agents accessing shared
+  knowledge across projects and teams
+- **Access control** — not all users/agents should see all areas
+- **Audit trail** — who changed what, when (compliance, debugging)
+- **API access** — GraphQL endpoint for external tools and integrations
+- **Concurrency** — SQLite single-writer lock already causes BUSY errors
+  with parallel Curator execution; this only gets worse with more agents
+
+SQLite cannot serve this trajectory. PostgreSQL via Gel provides ACID
+transactions, concurrent access, row-level permissions, and a native
+GraphQL API.
+
 The existing `KnowledgeStore` and `WorkspaceStorage` interfaces were
 designed to be pluggable. A graph backend is a new implementation of these
 interfaces plus a new `GraphStore` interface for graph-specific queries.
 
 ---
 
-## 5. Approach: JSONL Relationships + Materialized Graph
+## 5. Approach: Gel (PostgreSQL) as Primary Store
 
-Research (see design doc iteration 2) found that:
+Research (see design doc) found:
 
-- **EdgeDB is now Gel** (renamed Feb 2025). No embedded mode — requires a
-  running PostgreSQL server. Too heavy as the sole store.
-- **Relationships CAN live in JSONL** — one line per edge, append-only,
-  git-friendly. Similar to N-Triples (RDF) which proves flat-file graph
-  storage works.
-- **Graphiti (Zep)** validates the event-sourcing pattern: append-only
-  log → materialized graph. Same architecture mykb already uses.
+- **EdgeDB is now Gel** (renamed Feb 2025). Graph-relational DB on PostgreSQL.
+  Built-in GraphQL, TypeScript client, access policies, schema migrations.
+- **Graphiti (Zep)** validates graph-based knowledge stores for multi-agent
+  systems at scale.
 
-The decided approach (see design doc):
+The decided approach (see design doc iteration 3):
 
-1. **JSONL stays source of truth** — entries + a new `relationships.jsonl`
-2. **SQLite materializes the graph** — new relationships table with
-   recursive CTE traversal, alongside existing FTS5 index
-3. **Gel is a future option** — if graph queries outgrow SQLite, Gel can
-   be added as an additional materialized view. The architecture supports
-   this because JSONL is always the source of truth.
+1. **Gel on PostgreSQL is the source of truth** — entries, relationships,
+   workspaces, access control, and audit trail all live in Gel
+2. **GraphQL API** — built-in, enables external tools and multiple
+   vf-agents instances to query the KB concurrently
+3. **JSONL becomes import/export** — `kb export` for git archival and
+   portability, `kb import` for migration from v1
+4. **Local SQLite cache** — offline fallback for read operations, refreshed
+   via `kb sync`
+5. **PostgreSQL FTS** — replaces SQLite FTS5 as the primary search engine
 
-No new infrastructure required for the initial implementation.
+Deployment: `docker compose up` with a Gel container for personal use.
+Managed Gel/PostgreSQL for corporate use.
 
 ---
 
 ## 6. Design Principles
 
-Based on the v1 architecture and the review of the initial design draft:
+Based on the v1 architecture, review of the initial design draft, and
+the corporate KB trajectory:
 
-1. **JSONL source-of-truth question must be resolved first.** Relationships
-   don't fit naturally in JSONL. The design must decide: does JSONL remain
-   source of truth (with relationship loss on rebuild), or does the graph
-   DB become the source of truth (with JSONL as export format)?
+1. **Gel (PostgreSQL) is the source of truth.** A corporate KB needs ACID
+   transactions, concurrent access, access control, and audit trail. JSONL
+   becomes the portable import/export format.
 
 2. **Polymorphic types, not god objects.** Entry subtypes (Fact, Decision,
    Gotcha, Pattern, Link) should be modeled as separate types with shared
@@ -131,23 +150,25 @@ Based on the v1 architecture and the review of the initial design draft:
 3. **Relationships need metadata.** When was it created? By whom? Explicit
    or auto-extracted? What confidence? Directional or bidirectional?
 
-4. **Degraded mode is required.** The system must function when the graph
-   DB is unavailable. Define what works and what doesn't.
+4. **Degraded mode is required.** The system must function (reads at least)
+   when Gel is unavailable. Local SQLite cache as offline fallback.
 
-5. **Search must not regress.** SQLite FTS5 is fast and effective. The graph
-   backend must either match its full-text search capability or coexist
-   alongside it.
+5. **Search must not regress.** PostgreSQL FTS (`tsvector`) replaces SQLite
+   FTS5 as primary. Local SQLite FTS5 as offline fallback.
 
-6. **Dual-write consistency is hard.** Don't pretend it's simple. Define
-   the consistency model explicitly.
+6. **Multi-agent concurrency is a first-class concern.** Multiple vf-agents
+   instances will read/write simultaneously. No single-writer bottlenecks.
 
 7. **Graph traversal needs constraints.** Unbounded traversal on cyclic
    graphs is dangerous. Every query needs depth limits, edge-type filters,
    and cycle protection.
 
+8. **Access control from day one.** Even in personal mode, model users and
+   roles. Corporate mode activates them.
+
 ---
 
 ## 7. Next Step
 
-Create a design document (`graph-backend-DESIGN.md`) that addresses the
-principles above. Iterate until satisfied before any implementation begins.
+Design document (`graph-backend-DESIGN.md`) is being iterated. Currently
+at iteration 3 with all core design decisions resolved.
