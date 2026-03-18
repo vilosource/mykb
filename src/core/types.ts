@@ -103,6 +103,7 @@ export type EntryFilter = {
   area?: string;
   type?: EntryType;
   zone?: Zone;
+  excludeZone?: Zone;
   tags?: string[];
   provStatus?: ProvenanceStatus;
   search?: string;

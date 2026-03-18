@@ -301,6 +301,43 @@ describe('searchEntries', () => {
     db.close();
   });
 
+  it('should exclude archived entries when excludeZone is set', () => {
+    const db = createDatabase(':memory:');
+
+    upsertEntry(
+      db,
+      makeEntry({ id: 'dns-active', text: 'DNS uses CoreDNS', zone: Zone.Active }),
+    );
+    upsertEntry(
+      db,
+      makeEntry({ id: 'dns-archived', text: 'DNS used BIND9 (deprecated)', zone: Zone.Archive }),
+    );
+
+    const results = searchEntries(db, 'DNS', Zone.Archive);
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('dns-active');
+
+    db.close();
+  });
+
+  it('should return all entries including archived when no excludeZone', () => {
+    const db = createDatabase(':memory:');
+
+    upsertEntry(
+      db,
+      makeEntry({ id: 'dns-active', text: 'DNS uses CoreDNS', zone: Zone.Active }),
+    );
+    upsertEntry(
+      db,
+      makeEntry({ id: 'dns-archived', text: 'DNS used BIND9 (deprecated)', zone: Zone.Archive }),
+    );
+
+    const results = searchEntries(db, 'DNS');
+    expect(results).toHaveLength(2);
+
+    db.close();
+  });
+
   it('should return empty array for non-matching query', () => {
     const db = createDatabase(':memory:');
 
@@ -431,6 +468,21 @@ describe('queryEntries with filters', () => {
     );
   }
 
+  function seedEntriesWithArchive(db: Database.Database): void {
+    seedEntries(db);
+    upsertEntry(
+      db,
+      makeEntry({
+        id: 'net-a-01',
+        area: 'networking',
+        type: 'fact',
+        zone: Zone.Archive,
+        tags: ['old'],
+        text: 'Archived DNS fact',
+      }),
+    );
+  }
+
   const filterCases = [
     {
       name: 'should filter by area only',
@@ -479,6 +531,24 @@ describe('queryEntries with filters', () => {
       db.close();
     });
   }
+
+  it('should exclude archived entries with excludeZone filter', () => {
+    const db = createDatabase(':memory:');
+    seedEntriesWithArchive(db);
+    const entries = queryEntries(db, { area: 'networking', excludeZone: Zone.Archive });
+    const ids = entries.map((e) => e.id).sort();
+    expect(ids).toEqual(['net-d-01', 'net-f-01', 'net-g-01']);
+    db.close();
+  });
+
+  it('should return archived entries when no excludeZone is set', () => {
+    const db = createDatabase(':memory:');
+    seedEntriesWithArchive(db);
+    const entries = queryEntries(db, { area: 'networking' });
+    const ids = entries.map((e) => e.id).sort();
+    expect(ids).toEqual(['net-a-01', 'net-d-01', 'net-f-01', 'net-g-01']);
+    db.close();
+  });
 });
 
 // --- 5. Area metadata ---

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { DatabaseError } from './errors.js';
-import type { KnowledgeEntry, AreaMetadata, EntryFilter } from './types.js';
+import { type KnowledgeEntry, type AreaMetadata, type EntryFilter, type Zone } from './types.js';
 
 export type AreaStats = {
   facts: number;
@@ -250,6 +250,11 @@ export function queryEntries(db: Database.Database, filter: EntryFilter): Knowle
     params.zone = filter.zone;
   }
 
+  if (filter.excludeZone) {
+    conditions.push('zone != @excludeZone');
+    params.excludeZone = filter.excludeZone;
+  }
+
   if (filter.provStatus) {
     conditions.push('prov_status = @provStatus');
     params.provStatus = filter.provStatus;
@@ -277,7 +282,7 @@ export function sanitizeFtsQuery(query: string): string {
   return tokens.map((t) => `"${t}"`).join(' ');
 }
 
-export function searchEntries(db: Database.Database, query: string): KnowledgeEntry[] {
+export function searchEntries(db: Database.Database, query: string, excludeZone?: Zone): KnowledgeEntry[] {
   const sanitized = sanitizeFtsQuery(query);
   if (!sanitized) return [];
   const ftsRows = db
@@ -288,9 +293,15 @@ export function searchEntries(db: Database.Database, query: string): KnowledgeEn
 
   const ids = ftsRows.map((r) => r.id);
   const placeholders = ids.map(() => '?').join(',');
+  let entrySql = `SELECT * FROM entries WHERE id IN (${placeholders})`;
+  const entryParams: unknown[] = [...ids];
+  if (excludeZone) {
+    entrySql += ' AND zone != ?';
+    entryParams.push(excludeZone);
+  }
   const entryRows = db
-    .prepare(`SELECT * FROM entries WHERE id IN (${placeholders})`)
-    .all(...ids) as EntryRow[];
+    .prepare(entrySql)
+    .all(...entryParams) as EntryRow[];
 
   // Preserve FTS5 rank ordering
   const entryMap = new Map<string, EntryRow>();
