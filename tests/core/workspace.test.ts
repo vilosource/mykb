@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { withTempBrain } from '../helpers.js';
 import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
 import type { Workspace, WorkspaceState } from '../../src/core/types.js';
@@ -393,6 +395,148 @@ describe('FileSystemWorkspaceStorage Document Index', () => {
       expect(ws!.documents).toHaveLength(1);
       expect(ws!.documents[0].path).toBe('readme.md');
       expect(ws!.documents[0].description).toBe('Project readme');
+    });
+  });
+});
+
+describe('FileSystemWorkspaceStorage Session Isolation (KB_SESSION_ID)', () => {
+  let savedSessionId: string | undefined;
+
+  beforeEach(() => {
+    savedSessionId = process.env.KB_SESSION_ID;
+  });
+
+  afterEach(() => {
+    if (savedSessionId === undefined) {
+      delete process.env.KB_SESSION_ID;
+    } else {
+      process.env.KB_SESSION_ID = savedSessionId;
+    }
+  });
+
+  it('getActiveWorkspaceId with KB_SESSION_ID set + session file exists returns file content', async () => {
+    await withTempBrain(async (brainPath) => {
+      const sessionId = `test-${randomUUID()}`;
+      process.env.KB_SESSION_ID = sessionId;
+
+      const sessionFile = path.join(os.tmpdir(), `.mykb-session-${sessionId}`);
+      fs.writeFileSync(sessionFile, 'my-workspace\n');
+
+      try {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        expect(storage.getActiveWorkspaceId()).toBe('my-workspace');
+      } finally {
+        if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
+      }
+    });
+  });
+
+  it('getActiveWorkspaceId with KB_SESSION_ID set + no session file returns null', async () => {
+    await withTempBrain(async (brainPath) => {
+      const sessionId = `test-${randomUUID()}`;
+      process.env.KB_SESSION_ID = sessionId;
+
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      expect(storage.getActiveWorkspaceId()).toBeNull();
+    });
+  });
+
+  it('getActiveWorkspaceId with KB_SESSION_ID not set + .active exists returns .active content', async () => {
+    await withTempBrain(async (brainPath) => {
+      delete process.env.KB_SESSION_ID;
+
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('fallback-ws', 'Fallback');
+      // Write .active directly
+      const activeFile = path.join(brainPath, 'workspaces', '.active');
+      fs.writeFileSync(activeFile, 'fallback-ws\n');
+
+      expect(storage.getActiveWorkspaceId()).toBe('fallback-ws');
+    });
+  });
+
+  it('setActiveWorkspaceId with KB_SESSION_ID set writes to session file, .active unchanged', async () => {
+    await withTempBrain(async (brainPath) => {
+      const sessionId = `test-${randomUUID()}`;
+      process.env.KB_SESSION_ID = sessionId;
+
+      const sessionFile = path.join(os.tmpdir(), `.mykb-session-${sessionId}`);
+      const activeFile = path.join(brainPath, 'workspaces', '.active');
+
+      try {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('session-ws', 'Session WS');
+
+        // Pre-set .active to something else
+        fs.mkdirSync(path.join(brainPath, 'workspaces'), { recursive: true });
+        fs.writeFileSync(activeFile, 'other-ws\n');
+
+        storage.setActiveWorkspaceId('session-ws');
+
+        // Session file should have the workspace ID
+        expect(fs.existsSync(sessionFile)).toBe(true);
+        expect(fs.readFileSync(sessionFile, 'utf-8').trim()).toBe('session-ws');
+
+        // .active should be unchanged
+        expect(fs.readFileSync(activeFile, 'utf-8').trim()).toBe('other-ws');
+      } finally {
+        if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
+      }
+    });
+  });
+
+  it('setActiveWorkspaceId with KB_SESSION_ID not set writes to .active', async () => {
+    await withTempBrain(async (brainPath) => {
+      delete process.env.KB_SESSION_ID;
+
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('global-ws', 'Global WS');
+      storage.setActiveWorkspaceId('global-ws');
+
+      const activeFile = path.join(brainPath, 'workspaces', '.active');
+      expect(fs.readFileSync(activeFile, 'utf-8').trim()).toBe('global-ws');
+    });
+  });
+
+  it('clearActiveWorkspaceId with KB_SESSION_ID set removes session file, .active unchanged', async () => {
+    await withTempBrain(async (brainPath) => {
+      const sessionId = `test-${randomUUID()}`;
+      process.env.KB_SESSION_ID = sessionId;
+
+      const sessionFile = path.join(os.tmpdir(), `.mykb-session-${sessionId}`);
+      const activeFile = path.join(brainPath, 'workspaces', '.active');
+
+      try {
+        // Set up session file and .active
+        fs.writeFileSync(sessionFile, 'session-ws\n');
+        fs.mkdirSync(path.join(brainPath, 'workspaces'), { recursive: true });
+        fs.writeFileSync(activeFile, 'global-ws\n');
+
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.clearActiveWorkspaceId();
+
+        // Session file should be gone
+        expect(fs.existsSync(sessionFile)).toBe(false);
+        // .active should be unchanged
+        expect(fs.readFileSync(activeFile, 'utf-8').trim()).toBe('global-ws');
+      } finally {
+        if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
+      }
+    });
+  });
+
+  it('clearActiveWorkspaceId with KB_SESSION_ID not set removes .active', async () => {
+    await withTempBrain(async (brainPath) => {
+      delete process.env.KB_SESSION_ID;
+
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('doomed-ws', 'Doomed');
+      fs.mkdirSync(path.join(brainPath, 'workspaces'), { recursive: true });
+      fs.writeFileSync(path.join(brainPath, 'workspaces', '.active'), 'doomed-ws\n');
+
+      storage.clearActiveWorkspaceId();
+
+      expect(fs.existsSync(path.join(brainPath, 'workspaces', '.active'))).toBe(false);
     });
   });
 });

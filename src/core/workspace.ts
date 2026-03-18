@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type {
   Workspace,
@@ -28,6 +29,12 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
 
   private activeFile(): string {
     return path.join(this.workspacesDir, '.active');
+  }
+
+  private sessionFile(): string | null {
+    const sessionId = process.env.KB_SESSION_ID?.trim();
+    if (!sessionId) return null;
+    return path.join(os.tmpdir(), `.mykb-session-${sessionId}`);
   }
 
   private archiveDir(id: string): string {
@@ -145,17 +152,37 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   }
 
   getActiveWorkspaceId(): string | null {
+    // Tier 1: per-session isolation
+    const sf = this.sessionFile();
+    if (sf) {
+      if (fs.existsSync(sf)) {
+        return fs.readFileSync(sf, 'utf-8').trim() || null;
+      }
+      return null; // session active but no workspace set yet
+    }
+
+    // Tier 2: global fallback
     const file = this.activeFile();
     if (!fs.existsSync(file)) return null;
     return fs.readFileSync(file, 'utf-8').trim() || null;
   }
 
   setActiveWorkspaceId(id: string): void {
+    const sf = this.sessionFile();
+    if (sf) {
+      fs.writeFileSync(sf, id + '\n');
+      return;
+    }
     this.ensureDir(this.workspacesDir);
     fs.writeFileSync(this.activeFile(), id + '\n');
   }
 
   clearActiveWorkspaceId(): void {
+    const sf = this.sessionFile();
+    if (sf) {
+      if (fs.existsSync(sf)) fs.unlinkSync(sf);
+      return;
+    }
     const file = this.activeFile();
     if (fs.existsSync(file)) {
       fs.unlinkSync(file);
