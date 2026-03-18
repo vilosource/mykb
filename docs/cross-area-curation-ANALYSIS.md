@@ -297,10 +297,13 @@ This cross-area curation exercise validates the Curator research direction with 
 3. **Volatile entry detection is high-value, low-effort** — keyword-based flagging at write time catches stale entries early
 4. **Environment access is a known consolidation target** — the Curator can have specialized templates for common cluster types
 5. **Agent-based curation at scale needs multiple passes** — single-pass curation is insufficient for areas >50 entries
+6. **Retrieval verification must be part of curation** — after every curation action, verify the result is findable by FTS5 for likely queries, front-loaded with actionable values, and tagged for scorer alignment
+7. **Credential detection is a safety requirement** — TVV curation found a plaintext base64-encoded password in a knowledge entry. The Curator must scan for credential-like strings (base64, API keys, long random strings) and flag or redact them
+8. **Concurrent curation hits SQLite locks** — parallel agents curating different areas cause BUSY errors on the shared SQLite cache. The Curator must serialize writes or use WAL mode with longer busy timeouts
 
 ### Revised trust level recommendations
 Based on the profiles observed:
-- `auto` is safe for: flagging volatile entries, zone promotion of stable facts, detecting generic entries in project-specific areas
+- `auto` is safe for: flagging volatile entries, zone promotion of stable facts, detecting generic entries in project-specific areas, credential detection alerts
 - `suggest` is appropriate for: consolidation into patterns, supersession of conflicting entries
 - `manual` is required for: large area curation (>50 entries), cross-area entry relocation
 
