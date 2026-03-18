@@ -162,9 +162,12 @@ Run these commands and report results in a table:
 17. ansible localhost -m ping -o
 18. python3 -c "import json; print(json.dumps({'test': 'ok'}))"
 19. docker ps --format "table {{.Names}}\t{{.Status}}" | head -3
+20. ssh -o ConnectTimeout=5 -o BatchMode=yes metrics-server-1.prod.optiscangroup.com hostname
+
+A test PASSES if it produces meaningful output without errors. Report a summary line at the end: X/20 passed.
 ```
 
-**Expected result:** 19/19 pass. This verifies the full vfa orchestration pipeline (provider selection, profile volumes, env var passthrough, session isolation).
+**Expected result:** 20/20 pass. This verifies the full vfa orchestration pipeline (provider selection, profile volumes, env var passthrough, session isolation, SSH access).
 
 ## When to run each level
 
@@ -174,6 +177,7 @@ Run these commands and report results in a table:
 | Runtime Dockerfile modified | Required | Required | — |
 | kb profile changed | — | Required | Required |
 | Provider config changed | — | — | Required |
+| Access config changed | — | — | Required |
 | bashrc functions changed | — | — | Required |
 | kb CLI updated (new cli.js bundle) | Required | Required | — |
 | Volume mounts added/removed | — | Required | Required |
