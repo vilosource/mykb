@@ -482,6 +482,46 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
         expect(() => storage.addArtifact('ws', 'doc.md', '# Second')).toThrow(EntryValidationError);
       });
     });
+
+    const pathTraversalCases = [
+      { name: 'rejects filename with forward slash', filename: '../etc/passwd.md' },
+      { name: 'rejects filename with backslash', filename: '..\\etc\\passwd.md' },
+      { name: 'rejects filename with dot-dot', filename: '..doc.md' },
+    ];
+
+    it.each(pathTraversalCases)('$name', async ({ filename }) => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(() => storage.addArtifact('ws', filename, '# Bad')).toThrow(EntryValidationError);
+      });
+    });
+
+    it('register-only mode works when file already exists in docs/', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        fs.mkdirSync(docsDir, { recursive: true });
+        fs.writeFileSync(path.join(docsDir, 'existing-PLAN.md'), '---\ndescription: Pre-existing\n---\n# Plan');
+
+        const id = storage.addArtifact('ws', 'existing-PLAN.md', '---\ndescription: Pre-existing\n---\n# Plan');
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.filename).toBe('existing-PLAN.md');
+        expect(entry!.type).toBe('plan');
+        expect(entry!.description).toBe('Pre-existing');
+      });
+    });
+
+    it('register-only mode rejects if already registered in metadata', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'doc.md', '# Doc');
+        // File exists on disk AND in metadata — should reject
+        expect(() => storage.addArtifact('ws', 'doc.md', '# Doc again')).toThrow(EntryValidationError);
+      });
+    });
   });
 
   describe('listArtifacts', () => {
@@ -656,6 +696,19 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
         storage.createWorkspace('ws', 'Test');
         expect(() => storage.updateArtifact('ws', 'nonexistent', { description: 'x' }))
           .toThrow(ArtifactNotFoundError);
+      });
+    });
+
+    it('ignores filename change in updates to prevent desync', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'original.md', '# Original');
+        storage.updateArtifact('ws', id, { filename: 'renamed.md' } as Partial<import('../../src/core/types.js').ArtifactEntry>);
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.filename).toBe('original.md');
+        // File on disk should still be original.md
+        expect(fs.existsSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'original.md'))).toBe(true);
       });
     });
   });

@@ -294,7 +294,12 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
       throw new EntryValidationError(`Filename must end with .md: ${filename}`);
     }
 
-    // Check for duplicate filename
+    // Reject path separators to prevent directory traversal
+    if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+      throw new EntryValidationError(`Filename must not contain path separators: ${filename}`);
+    }
+
+    // Check for duplicate filename in metadata
     const existing = this.listArtifacts(workspaceId);
     if (existing.some((a) => a.filename === filename)) {
       throw new EntryValidationError(`Artifact '${filename}' already exists`);
@@ -306,7 +311,6 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     const filePath = path.join(docsDir, filename);
     if (fs.existsSync(filePath)) {
       // Register-only mode: file already on disk, just register metadata
-      // Verify content matches to avoid silent data loss
     } else {
       // Exclusive create: prevents race condition where two processes both
       // pass the duplicate check and try to write the same file
@@ -401,6 +405,7 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
       ...entry,
       ...updates,
       id: entry.id, // never allow ID change
+      filename: entry.filename, // never allow filename change (would desync from file on disk)
       updated: new Date().toISOString(),
     };
     fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(updated) + '\n');
