@@ -180,12 +180,54 @@ describe('renderWorkspace', () => {
     expect(output).toContain('Wiki: https://wiki.example.com');
   });
 
-  it('renders artifacts with descriptions', () => {
+  it('renders artifacts with id, type, filename, and description', () => {
     const ws = makeWorkspace();
     const output = renderWorkspace(ws, []);
+    expect(output).toContain('Artifacts:');
+    // Each line has id, type (padded), filename, description
+    expect(output).toContain('abc12345');
+    expect(output).toContain('design');
     expect(output).toContain('docs/server-inventory.md');
     expect(output).toContain('VM specs and IPs');
+    expect(output).toContain('def67890');
     expect(output).toContain('backlog/items.md');
+  });
+
+  it('renders artifact with empty description without trailing dash', () => {
+    const ws = makeWorkspace({
+      artifacts: [{ id: 'xyz00001', filename: 'notes.md', type: 'other', description: '' }],
+    });
+    const output = renderWorkspace(ws, []);
+    expect(output).toContain('xyz00001');
+    expect(output).toContain('notes.md');
+    expect(output).not.toContain('notes.md —');
+  });
+
+  it('aligns artifact types in columns', () => {
+    const ws = makeWorkspace({
+      artifacts: [
+        { id: 'aaa00001', filename: 'a-PLAN.md', type: 'plan', description: 'Plan' },
+        { id: 'bbb00002', filename: 'b-DESIGN.md', type: 'design', description: 'Design' },
+        { id: 'ccc00003', filename: 'c-ANALYSIS.md', type: 'analysis', description: 'Analysis' },
+      ],
+    });
+    const output = renderWorkspace(ws, []);
+    const lines = output.split('\n').filter((l) => l.includes('aaa00001') || l.includes('bbb00002') || l.includes('ccc00003'));
+    // All type fields should be padded to same width
+    const typePositions = lines.map((l) => l.indexOf('plan') !== -1 ? l.indexOf('plan') : l.indexOf('design') !== -1 ? l.indexOf('design') : l.indexOf('analysis'));
+    expect(new Set(typePositions).size).toBe(1); // all start at same column
+  });
+
+  it('rendered artifacts are LLM-scannable (behavioral)', () => {
+    const ws = makeWorkspace();
+    const output = renderWorkspace(ws, []);
+    // IDs are extractable — 8-char alphanumeric strings on artifact lines
+    const artifactLines = output.split('\n').filter((l) => l.match(/^\s+\w{8}\s/));
+    expect(artifactLines.length).toBeGreaterThanOrEqual(2);
+    // Filenames are readable
+    expect(artifactLines.some((l) => l.includes('.md'))).toBe(true);
+    // Types provide categorization
+    expect(artifactLines.some((l) => l.includes('design') || l.includes('other'))).toBe(true);
   });
 
   it('renders journal entries', () => {
@@ -212,7 +254,7 @@ describe('renderWorkspace', () => {
   it('renders workspace with no artifacts', () => {
     const ws = makeWorkspace({ artifacts: [] });
     const output = renderWorkspace(ws, []);
-    expect(output).not.toContain('Documents:');
+    expect(output).not.toContain('Artifacts:');
   });
 
   it('renders workspace with no journal', () => {

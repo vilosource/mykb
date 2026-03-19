@@ -106,12 +106,14 @@ export function renderWorkspace(workspace: Workspace, journalEntries: JournalEnt
 
   // Artifacts
   if (workspace.artifacts.length > 0) {
-    lines.push('Documents:');
-    for (const doc of workspace.artifacts) {
-      if (doc.description) {
-        lines.push(`  - ${doc.filename} — ${doc.description}`);
+    lines.push('Artifacts:');
+    const maxType = Math.max(...workspace.artifacts.map((a) => a.type.length));
+    for (const a of workspace.artifacts) {
+      const typePadded = a.type.padEnd(maxType);
+      if (a.description) {
+        lines.push(`  ${a.id}  ${typePadded}  ${a.filename} — ${a.description}`);
       } else {
-        lines.push(`  - ${doc.filename}`);
+        lines.push(`  ${a.id}  ${typePadded}  ${a.filename}`);
       }
     }
   }
