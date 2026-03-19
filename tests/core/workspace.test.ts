@@ -760,6 +760,91 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
       });
     });
   });
+
+  describe('syncArtifacts', () => {
+    it('returns empty results when no docs/ dir and no artifacts.jsonl', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const result = storage.syncArtifacts('ws');
+        expect(result.tracked).toEqual([]);
+        expect(result.untracked).toEqual([]);
+        expect(result.missing).toEqual([]);
+      });
+    });
+
+    it('reports all files as tracked when all have metadata', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'one.md', '# One');
+        storage.addArtifact('ws', 'two.md', '# Two');
+        const result = storage.syncArtifacts('ws');
+        expect(result.tracked).toHaveLength(2);
+        expect(result.untracked).toEqual([]);
+        expect(result.missing).toEqual([]);
+      });
+    });
+
+    it('reports untracked .md files in docs/', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        fs.mkdirSync(docsDir, { recursive: true });
+        fs.writeFileSync(path.join(docsDir, 'mystery.md'), '# Mystery');
+        const result = storage.syncArtifacts('ws');
+        expect(result.untracked).toEqual(['mystery.md']);
+        expect(result.tracked).toEqual([]);
+      });
+    });
+
+    it('ignores non-.md files in docs/', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        fs.mkdirSync(docsDir, { recursive: true });
+        fs.writeFileSync(path.join(docsDir, 'script.sh'), '#!/bin/bash');
+        const result = storage.syncArtifacts('ws');
+        expect(result.untracked).toEqual([]);
+      });
+    });
+
+    it('reports missing when metadata exists but file deleted', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'gone.md', '# Gone');
+        fs.unlinkSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'gone.md'));
+        const result = storage.syncArtifacts('ws');
+        expect(result.missing).toHaveLength(1);
+        expect(result.missing[0].filename).toBe('gone.md');
+        expect(result.tracked).toEqual([]);
+      });
+    });
+
+    it('handles mix of tracked, untracked, and missing', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        // tracked
+        storage.addArtifact('ws', 'tracked.md', '# Tracked');
+        // missing (metadata but no file)
+        storage.addArtifact('ws', 'missing.md', '# Missing');
+        fs.unlinkSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'missing.md'));
+        // untracked (file but no metadata)
+        fs.writeFileSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'untracked.md'), '# Untracked');
+
+        const result = storage.syncArtifacts('ws');
+        expect(result.tracked).toHaveLength(1);
+        expect(result.tracked[0].filename).toBe('tracked.md');
+        expect(result.untracked).toEqual(['untracked.md']);
+        expect(result.missing).toHaveLength(1);
+        expect(result.missing[0].filename).toBe('missing.md');
+      });
+    });
+  });
 });
 
 describe('FileSystemWorkspaceStorage Session Isolation (KB_SESSION_ID)', () => {

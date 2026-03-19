@@ -455,7 +455,37 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     this.refreshArtifactSummaries(workspaceId);
   }
 
-  syncArtifacts(_workspaceId: string): ArtifactSyncResult {
-    throw new Error('Not implemented');
+  syncArtifacts(workspaceId: string): ArtifactSyncResult {
+    const docsDir = this.docsDir(workspaceId);
+    const artifacts = this.listArtifacts(workspaceId);
+    const trackedFilenames = new Set(artifacts.map((a) => a.filename));
+
+    // Scan docs/ for .md files
+    const filesOnDisk = new Set<string>();
+    if (fs.existsSync(docsDir)) {
+      for (const entry of fs.readdirSync(docsDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        filesOnDisk.add(entry.name);
+      }
+    }
+
+    const tracked: ArtifactEntry[] = [];
+    const missing: ArtifactEntry[] = [];
+    for (const artifact of artifacts) {
+      if (filesOnDisk.has(artifact.filename)) {
+        tracked.push(artifact);
+      } else {
+        missing.push(artifact);
+      }
+    }
+
+    const untracked: string[] = [];
+    for (const file of filesOnDisk) {
+      if (!trackedFilenames.has(file)) {
+        untracked.push(file);
+      }
+    }
+
+    return { tracked, untracked, missing };
   }
 }
