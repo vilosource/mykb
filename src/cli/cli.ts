@@ -707,4 +707,270 @@ workCmd
     console.log(`Workspace '${id}' archived`);
   });
 
+// --- Workspace Artifacts (wsa) ---
+
+const wsaCmd = program.command('wsa').description('Workspace artifacts');
+
+wsaCmd
+  .command('add <filename>')
+  .description('Add/register a workspace artifact')
+  .option('--from <path>', 'Copy file from path into docs/')
+  .option('--desc <description>', 'One-line description')
+  .option('--type <type>', 'Artifact type (plan, design, analysis, report, notes, prompt, other)')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .option('--areas <areas>', 'Comma-separated area IDs')
+  .action(
+    (
+      filename: string,
+      opts: { from?: string; desc?: string; type?: string; tags?: string; areas?: string },
+    ) => {
+      const storage = createWorkspaceStorage();
+      const activeId = requireActiveWorkspace(storage);
+      const docsDir = path.join(resolveBrainPath(), 'workspaces', activeId, 'docs');
+
+      let content: string;
+      if (opts.from) {
+        if (!fs.existsSync(opts.from)) {
+          process.stderr.write(`Error: File not found: ${opts.from}\n`);
+          process.exit(1);
+        }
+        content = fs.readFileSync(opts.from, 'utf-8');
+      } else if (fs.existsSync(path.join(docsDir, filename))) {
+        content = fs.readFileSync(path.join(docsDir, filename), 'utf-8');
+      } else {
+        // Read from stdin
+        content = fs.readFileSync(0, 'utf-8');
+      }
+
+      try {
+        const id = storage.addArtifact(activeId, filename, content, {
+          type: opts.type as import('../core/types.js').ArtifactType | undefined,
+          description: opts.desc,
+          tags: opts.tags ? opts.tags.split(',').map((t) => t.trim()) : undefined,
+          areas: opts.areas ? opts.areas.split(',').map((a) => a.trim()) : undefined,
+        });
+        console.log(`Artifact added: ${id} ${filename}`);
+      } catch (e: unknown) {
+        process.stderr.write(`Error: ${(e as Error).message}\n`);
+        process.exit(1);
+      }
+    },
+  );
+
+wsaCmd
+  .command('list')
+  .description('List workspace artifacts')
+  .action(() => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const artifacts = storage.listArtifacts(activeId);
+
+    if (artifacts.length === 0) {
+      console.log('No artifacts in this workspace.');
+      return;
+    }
+
+    const maxType = Math.max(...artifacts.map((a) => a.type.length));
+    for (const a of artifacts) {
+      const typePadded = a.type.padEnd(maxType);
+      if (a.description) {
+        console.log(`${a.id}  ${typePadded}  ${a.filename} — ${a.description}`);
+      } else {
+        console.log(`${a.id}  ${typePadded}  ${a.filename}`);
+      }
+    }
+  });
+
+wsaCmd
+  .command('show <artifact>')
+  .description('Show full artifact content')
+  .action((artifact: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const content = storage.readArtifactContent(activeId, artifact);
+
+    if (content === null) {
+      process.stderr.write(`Error: Artifact '${artifact}' not found. Run kb wsa list to see available artifacts.\n`);
+      process.exit(1);
+    }
+
+    process.stdout.write(content);
+  });
+
+wsaCmd
+  .command('meta <artifact>')
+  .description('Show artifact metadata')
+  .action((artifact: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const entry = storage.readArtifact(activeId, artifact);
+
+    if (!entry) {
+      process.stderr.write(`Error: Artifact '${artifact}' not found. Run kb wsa list to see available artifacts.\n`);
+      process.exit(1);
+    }
+
+    console.log(`ID:          ${entry.id}`);
+    console.log(`Filename:    ${entry.filename}`);
+    console.log(`Type:        ${entry.type}`);
+    console.log(`Description: ${entry.description || '(none)'}`);
+    console.log(`Tags:        ${entry.tags.length > 0 ? entry.tags.join(', ') : '(none)'}`);
+    console.log(`Areas:       ${entry.areas.length > 0 ? entry.areas.join(', ') : '(none)'}`);
+    console.log(`Created:     ${entry.created}`);
+    console.log(`Updated:     ${entry.updated}`);
+  });
+
+wsaCmd
+  .command('update <artifact>')
+  .description('Update artifact metadata')
+  .option('--desc <description>', 'Update description')
+  .option('--type <type>', 'Update type')
+  .option('--tags <tags>', 'Update tags (comma-separated)')
+  .option('--areas <areas>', 'Update areas (comma-separated)')
+  .action(
+    (artifact: string, opts: { desc?: string; type?: string; tags?: string; areas?: string }) => {
+      const storage = createWorkspaceStorage();
+      const activeId = requireActiveWorkspace(storage);
+
+      const updates: Record<string, unknown> = {};
+      if (opts.desc !== undefined) updates.description = opts.desc;
+      if (opts.type !== undefined) updates.type = opts.type;
+      if (opts.tags !== undefined) updates.tags = opts.tags.split(',').map((t) => t.trim());
+      if (opts.areas !== undefined) updates.areas = opts.areas.split(',').map((a) => a.trim());
+
+      try {
+        storage.updateArtifact(activeId, artifact, updates as Partial<import('../core/types.js').ArtifactEntry>);
+        console.log('Artifact updated.');
+      } catch (e: unknown) {
+        process.stderr.write(`Error: ${(e as Error).message}\n`);
+        process.exit(1);
+      }
+    },
+  );
+
+wsaCmd
+  .command('delete <artifact>')
+  .description('Delete a workspace artifact')
+  .action((artifact: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+
+    try {
+      storage.deleteArtifact(activeId, artifact);
+      console.log('Artifact deleted.');
+    } catch (e: unknown) {
+      process.stderr.write(`Error: ${(e as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+wsaCmd
+  .command('sync')
+  .description('Reconcile docs/ with artifact metadata')
+  .option('--fix', 'Auto-register untracked files')
+  .action((opts: { fix?: boolean }) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const result = storage.syncArtifacts(activeId);
+
+    if (result.tracked.length > 0) {
+      console.log(`Tracked: ${result.tracked.length} artifact(s)`);
+    }
+
+    if (result.untracked.length > 0) {
+      console.log('Untracked files:');
+      for (const f of result.untracked) {
+        console.log(`  ${f}`);
+      }
+
+      if (opts.fix) {
+        const docsDir = path.join(resolveBrainPath(), 'workspaces', activeId, 'docs');
+        for (const f of result.untracked) {
+          const content = fs.readFileSync(path.join(docsDir, f), 'utf-8');
+          storage.addArtifact(activeId, f, content);
+        }
+        console.log(`Registered ${result.untracked.length} untracked file(s).`);
+      }
+    }
+
+    if (result.missing.length > 0) {
+      console.log('Missing files (metadata exists, file deleted):');
+      for (const a of result.missing) {
+        console.log(`  ${a.id}  ${a.filename}`);
+      }
+    }
+
+    if (result.tracked.length === 0 && result.untracked.length === 0 && result.missing.length === 0) {
+      console.log('No artifacts to sync.');
+    }
+  });
+
+wsaCmd
+  .command('link <artifact> <area>')
+  .description('Link artifact to a knowledge area')
+  .action((artifact: string, area: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const entry = storage.readArtifact(activeId, artifact);
+
+    if (!entry) {
+      process.stderr.write(`Error: Artifact '${artifact}' not found.\n`);
+      process.exit(1);
+    }
+
+    if (!entry.areas.includes(area)) {
+      storage.updateArtifact(activeId, entry.id, { areas: [...entry.areas, area] });
+    }
+    console.log(`Artifact linked to area '${area}'.`);
+  });
+
+wsaCmd
+  .command('unlink <artifact> <area>')
+  .description('Unlink artifact from a knowledge area')
+  .action((artifact: string, area: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const entry = storage.readArtifact(activeId, artifact);
+
+    if (!entry) {
+      process.stderr.write(`Error: Artifact '${artifact}' not found.\n`);
+      process.exit(1);
+    }
+
+    storage.updateArtifact(activeId, entry.id, { areas: entry.areas.filter((a) => a !== area) });
+    console.log(`Artifact unlinked from area '${area}'.`);
+  });
+
+wsaCmd
+  .command('search <query>')
+  .description('Search artifact content')
+  .action((query: string) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+    const docsDir = path.join(resolveBrainPath(), 'workspaces', activeId, 'docs');
+
+    if (!fs.existsSync(docsDir)) {
+      console.log('No artifacts to search.');
+      return;
+    }
+
+    const files = fs.readdirSync(docsDir).filter((f) => f.endsWith('.md'));
+    let found = false;
+
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(docsDir, file), 'utf-8');
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(query)) {
+          console.log(`${file}:${i + 1}: ${lines[i]}`);
+          found = true;
+        }
+      }
+    }
+
+    if (!found) {
+      console.log('No matches found.');
+    }
+  });
+
 program.parse();
