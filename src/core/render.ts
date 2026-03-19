@@ -104,14 +104,16 @@ export function renderWorkspace(workspace: Workspace, journalEntries: JournalEnt
     lines.push(`Links: ${linkParts.join(' | ')}`);
   }
 
-  // Documents
-  if (workspace.documents.length > 0) {
-    lines.push('Documents:');
-    for (const doc of workspace.documents) {
-      if (doc.description) {
-        lines.push(`  - ${doc.path} — ${doc.description}`);
+  // Artifacts
+  if (workspace.artifacts.length > 0) {
+    lines.push('Artifacts:');
+    const maxType = Math.max(...workspace.artifacts.map((a) => a.type.length));
+    for (const a of workspace.artifacts) {
+      const typePadded = a.type.padEnd(maxType);
+      if (a.description) {
+        lines.push(`  ${a.id}  ${typePadded}  ${a.filename} — ${a.description}`);
       } else {
-        lines.push(`  - ${doc.path}`);
+        lines.push(`  ${a.id}  ${typePadded}  ${a.filename}`);
       }
     }
   }

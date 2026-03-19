@@ -46,3 +46,10 @@ export class WorkspaceNotFoundError extends Error {
     this.name = 'WorkspaceNotFoundError';
   }
 }
+
+export class ArtifactNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ArtifactNotFoundError';
+  }
+}

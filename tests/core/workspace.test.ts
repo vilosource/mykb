@@ -5,7 +5,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withTempBrain } from '../helpers.js';
 import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
-import type { Workspace, WorkspaceState } from '../../src/core/types.js';
+import type { Workspace, WorkspaceState, ArtifactEntry } from '../../src/core/types.js';
+import { EntryValidationError, ArtifactNotFoundError } from '../../src/core/errors.js';
 
 describe('FileSystemWorkspaceStorage CRUD', () => {
   it('createWorkspace creates workspace.json with correct structure', async () => {
@@ -22,7 +23,7 @@ describe('FileSystemWorkspaceStorage CRUD', () => {
       expect(data.state).toEqual({});
       expect(data.areas).toEqual([]);
       expect(data.links).toEqual({});
-      expect(data.documents).toEqual([]);
+      expect(data.artifacts).toEqual([]);
       expect(data.created).toBeDefined();
       expect(data.updated).toBeDefined();
     });
@@ -56,7 +57,7 @@ describe('FileSystemWorkspaceStorage CRUD', () => {
       expect(ws!.state).toEqual({});
       expect(ws!.areas).toEqual([]);
       expect(ws!.links).toEqual({});
-      expect(ws!.documents).toEqual([]);
+      expect(ws!.artifacts).toEqual([]);
       expect(typeof ws!.created).toBe('string');
       expect(typeof ws!.updated).toBe('string');
     });
@@ -298,103 +299,502 @@ describe('FileSystemWorkspaceStorage Journal', () => {
   });
 });
 
-describe('FileSystemWorkspaceStorage Document Index', () => {
-  it('scanDocumentIndex with no docs returns empty array', async () => {
+describe('FileSystemWorkspaceStorage Backward Compat (documents → artifacts)', () => {
+  const cases = [
+    {
+      name: 'workspace.json with documents field migrates to artifacts: []',
+      setup: (raw: Record<string, unknown>) => {
+        delete raw.artifacts;
+        raw.documents = [{ path: 'old.md', description: 'legacy doc' }];
+      },
+      expectArtifacts: [],
+      expectNoDocuments: true,
+    },
+    {
+      name: 'workspace.json with neither documents nor artifacts defaults to artifacts: []',
+      setup: (raw: Record<string, unknown>) => {
+        delete raw.artifacts;
+        delete raw.documents;
+      },
+      expectArtifacts: [],
+      expectNoDocuments: false,
+    },
+    {
+      name: 'workspace.json with artifacts field returns artifacts as-is',
+      setup: (raw: Record<string, unknown>) => {
+        raw.artifacts = [{ id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' }];
+      },
+      expectArtifacts: [{ id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' }],
+      expectNoDocuments: false,
+    },
+  ];
+
+  it.each(cases)('$name', async ({ setup, expectArtifacts, expectNoDocuments }) => {
     await withTempBrain(async (brainPath) => {
       const storage = new FileSystemWorkspaceStorage(brainPath);
-      storage.createWorkspace('my-proj', 'My Project');
+      storage.createWorkspace('compat-test', 'Compat Test');
 
-      const docs = storage.scanDocumentIndex('my-proj');
-      expect(docs).toEqual([]);
-    });
-  });
+      const wsFile = path.join(brainPath, 'workspaces', 'compat-test', 'workspace.json');
+      const raw = JSON.parse(fs.readFileSync(wsFile, 'utf-8'));
+      setup(raw);
+      fs.writeFileSync(wsFile, JSON.stringify(raw, null, 2) + '\n');
 
-  it('scanDocumentIndex finds .md files in workspace directory', async () => {
-    await withTempBrain(async (brainPath) => {
-      const storage = new FileSystemWorkspaceStorage(brainPath);
-      storage.createWorkspace('my-proj', 'My Project');
-
-      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
-      fs.writeFileSync(path.join(wsDir, 'notes.md'), '# Notes\nSome content\n');
-
-      const docs = storage.scanDocumentIndex('my-proj');
-      expect(docs).toHaveLength(1);
-      expect(docs[0].path).toBe('notes.md');
-      expect(docs[0].description).toBeNull();
-    });
-  });
-
-  it('scanDocumentIndex with doc missing frontmatter returns description null', async () => {
-    await withTempBrain(async (brainPath) => {
-      const storage = new FileSystemWorkspaceStorage(brainPath);
-      storage.createWorkspace('my-proj', 'My Project');
-
-      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
-      fs.writeFileSync(path.join(wsDir, 'plain.md'), 'Just plain text\n');
-
-      const docs = storage.scanDocumentIndex('my-proj');
-      const doc = docs.find((d) => d.path === 'plain.md');
-      expect(doc).toBeDefined();
-      expect(doc!.description).toBeNull();
-    });
-  });
-
-  it('scanDocumentIndex with doc having frontmatter extracts description', async () => {
-    await withTempBrain(async (brainPath) => {
-      const storage = new FileSystemWorkspaceStorage(brainPath);
-      storage.createWorkspace('my-proj', 'My Project');
-
-      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
-      fs.writeFileSync(
-        path.join(wsDir, 'spec.md'),
-        '---\ndescription: Server inventory and IPs\n---\n# Spec\nContent here\n'
-      );
-
-      const docs = storage.scanDocumentIndex('my-proj');
-      const doc = docs.find((d) => d.path === 'spec.md');
-      expect(doc).toBeDefined();
-      expect(doc!.description).toBe('Server inventory and IPs');
-    });
-  });
-
-  it('scanDocumentIndex finds docs in subdirectories', async () => {
-    await withTempBrain(async (brainPath) => {
-      const storage = new FileSystemWorkspaceStorage(brainPath);
-      storage.createWorkspace('my-proj', 'My Project');
-
-      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
-      const docsDir = path.join(wsDir, 'docs');
-      fs.mkdirSync(docsDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(docsDir, 'deep.md'),
-        '---\ndescription: Deep doc\n---\n# Deep\n'
-      );
-
-      const docs = storage.scanDocumentIndex('my-proj');
-      const doc = docs.find((d) => d.path === 'docs/deep.md');
-      expect(doc).toBeDefined();
-      expect(doc!.description).toBe('Deep doc');
-    });
-  });
-
-  it('updateDocumentIndex writes scanned docs to workspace.json', async () => {
-    await withTempBrain(async (brainPath) => {
-      const storage = new FileSystemWorkspaceStorage(brainPath);
-      storage.createWorkspace('my-proj', 'My Project');
-
-      const wsDir = path.join(brainPath, 'workspaces', 'my-proj');
-      fs.writeFileSync(
-        path.join(wsDir, 'readme.md'),
-        '---\ndescription: Project readme\n---\n# README\n'
-      );
-
-      storage.updateDocumentIndex('my-proj');
-
-      const ws = storage.readWorkspace('my-proj');
+      const ws = storage.readWorkspace('compat-test');
       expect(ws).not.toBeNull();
-      expect(ws!.documents).toHaveLength(1);
-      expect(ws!.documents[0].path).toBe('readme.md');
-      expect(ws!.documents[0].description).toBe('Project readme');
+      expect(ws!.artifacts).toEqual(expectArtifacts);
+      if (expectNoDocuments) {
+        expect((ws as Record<string, unknown>).documents).toBeUndefined();
+      }
+    });
+  });
+});
+
+describe('FileSystemWorkspaceStorage Artifacts', () => {
+  describe('addArtifact', () => {
+    const typeInferenceCases = [
+      { name: 'infers plan from -PLAN suffix', filename: 'migration-PLAN.md', expectedType: 'plan' },
+      { name: 'infers design from -DESIGN suffix', filename: 'arch-DESIGN.md', expectedType: 'design' },
+      { name: 'infers analysis from -ANALYSIS suffix', filename: 'risk-ANALYSIS.md', expectedType: 'analysis' },
+      { name: 'infers design from -ARCHITECTURE suffix', filename: 'sys-ARCHITECTURE.md', expectedType: 'design' },
+      { name: 'infers report from -GUIDE suffix', filename: 'ops-GUIDE.md', expectedType: 'report' },
+      { name: 'infers other when no matching suffix', filename: 'notes.md', expectedType: 'other' },
+      { name: 'infers type case-insensitively', filename: 'foo-plan.md', expectedType: 'plan' },
+    ];
+
+    it.each(typeInferenceCases)('$name', async ({ filename, expectedType }) => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', filename, '# Content');
+        const entry = storage.readArtifact('ws', id);
+        expect(entry).not.toBeNull();
+        expect(entry!.type).toBe(expectedType);
+      });
+    });
+
+    it('writes file to docs/, creates artifacts.jsonl entry, updates workspace.json, returns id', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'notes-PLAN.md', '# Notes');
+
+        expect(typeof id).toBe('string');
+        expect(id.length).toBeGreaterThan(0);
+
+        // File written to docs/
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        expect(fs.existsSync(path.join(docsDir, 'notes-PLAN.md'))).toBe(true);
+        expect(fs.readFileSync(path.join(docsDir, 'notes-PLAN.md'), 'utf-8')).toBe('# Notes');
+
+        // Entry in artifacts.jsonl
+        const jsonlFile = path.join(brainPath, 'workspaces', 'ws', 'artifacts.jsonl');
+        expect(fs.existsSync(jsonlFile)).toBe(true);
+        const lines = fs.readFileSync(jsonlFile, 'utf-8').trim().split('\n');
+        const entry = JSON.parse(lines[0]) as ArtifactEntry;
+        expect(entry.id).toBe(id);
+        expect(entry.filename).toBe('notes-PLAN.md');
+        expect(entry.type).toBe('plan');
+
+        // workspace.json artifacts updated
+        const ws = storage.readWorkspace('ws');
+        expect(ws!.artifacts).toHaveLength(1);
+        expect(ws!.artifacts[0].id).toBe(id);
+        expect(ws!.artifacts[0].filename).toBe('notes-PLAN.md');
+      });
+    });
+
+    it('explicit type overrides inference', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'foo.md', '# Foo', { type: 'analysis' });
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.type).toBe('analysis');
+      });
+    });
+
+    const descriptionCases = [
+      {
+        name: 'extracts description from frontmatter',
+        content: '---\ndescription: My desc\n---\n# Content',
+        options: {},
+        expectedDesc: 'My desc',
+      },
+      {
+        name: 'explicit description overrides frontmatter',
+        content: '---\ndescription: From frontmatter\n---\n# Content',
+        options: { description: 'Override' },
+        expectedDesc: 'Override',
+      },
+      {
+        name: 'no frontmatter and no explicit description defaults to empty string',
+        content: '# Just content',
+        options: {},
+        expectedDesc: '',
+      },
+    ];
+
+    it.each(descriptionCases)('$name', async ({ content, options, expectedDesc }) => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', content, options);
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.description).toBe(expectedDesc);
+      });
+    });
+
+    it('sets tags and areas from options', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc', { tags: ['t1', 't2'], areas: ['infra'] });
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.tags).toEqual(['t1', 't2']);
+        expect(entry!.areas).toEqual(['infra']);
+      });
+    });
+
+    it('defaults tags and areas to empty arrays', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc');
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.tags).toEqual([]);
+        expect(entry!.areas).toEqual([]);
+      });
+    });
+
+    it('rejects non-.md filename', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(() => storage.addArtifact('ws', 'script.sh', '#!/bin/bash')).toThrow(EntryValidationError);
+      });
+    });
+
+    it('rejects duplicate filename', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'doc.md', '# First');
+        expect(() => storage.addArtifact('ws', 'doc.md', '# Second')).toThrow(EntryValidationError);
+      });
+    });
+
+    const pathTraversalCases = [
+      { name: 'rejects filename with forward slash', filename: '../etc/passwd.md' },
+      { name: 'rejects filename with backslash', filename: '..\\etc\\passwd.md' },
+      { name: 'rejects filename with dot-dot', filename: '..doc.md' },
+    ];
+
+    it.each(pathTraversalCases)('$name', async ({ filename }) => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(() => storage.addArtifact('ws', filename, '# Bad')).toThrow(EntryValidationError);
+      });
+    });
+
+    it('register-only mode works when file already exists in docs/', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        fs.mkdirSync(docsDir, { recursive: true });
+        fs.writeFileSync(path.join(docsDir, 'existing-PLAN.md'), '---\ndescription: Pre-existing\n---\n# Plan');
+
+        const id = storage.addArtifact('ws', 'existing-PLAN.md', '---\ndescription: Pre-existing\n---\n# Plan');
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.filename).toBe('existing-PLAN.md');
+        expect(entry!.type).toBe('plan');
+        expect(entry!.description).toBe('Pre-existing');
+      });
+    });
+
+    it('register-only mode rejects if already registered in metadata', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'doc.md', '# Doc');
+        // File exists on disk AND in metadata — should reject
+        expect(() => storage.addArtifact('ws', 'doc.md', '# Doc again')).toThrow(EntryValidationError);
+      });
+    });
+  });
+
+  describe('listArtifacts', () => {
+    it('returns empty array when no artifacts.jsonl exists', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(storage.listArtifacts('ws')).toEqual([]);
+      });
+    });
+
+    it('returns all added artifacts', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'one-PLAN.md', '# One');
+        storage.addArtifact('ws', 'two-DESIGN.md', '# Two');
+        const list = storage.listArtifacts('ws');
+        expect(list).toHaveLength(2);
+        expect(list.map((a) => a.filename)).toEqual(['one-PLAN.md', 'two-DESIGN.md']);
+      });
+    });
+
+    it('excludes deleted artifacts', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doomed.md', '# Doomed');
+        storage.addArtifact('ws', 'keeper.md', '# Keeper');
+        storage.deleteArtifact('ws', id);
+        const list = storage.listArtifacts('ws');
+        expect(list).toHaveLength(1);
+        expect(list[0].filename).toBe('keeper.md');
+      });
+    });
+  });
+
+  describe('readArtifact', () => {
+    it('looks up by ID', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc-PLAN.md', '# Plan');
+        const entry = storage.readArtifact('ws', id);
+        expect(entry).not.toBeNull();
+        expect(entry!.id).toBe(id);
+        expect(entry!.filename).toBe('doc-PLAN.md');
+        expect(entry!.type).toBe('plan');
+        expect(typeof entry!.created).toBe('string');
+        expect(typeof entry!.updated).toBe('string');
+      });
+    });
+
+    it('looks up by filename', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'doc-PLAN.md', '# Plan');
+        const entry = storage.readArtifact('ws', 'doc-PLAN.md');
+        expect(entry).not.toBeNull();
+        expect(entry!.filename).toBe('doc-PLAN.md');
+      });
+    });
+
+    it('returns null for non-existent ID or filename', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(storage.readArtifact('ws', 'nonexistent')).toBeNull();
+      });
+    });
+
+    it('returns null for deleted artifact', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc');
+        storage.deleteArtifact('ws', id);
+        expect(storage.readArtifact('ws', id)).toBeNull();
+      });
+    });
+  });
+
+  describe('readArtifactContent', () => {
+    const cases = [
+      { name: 'returns content by ID', lookupBy: 'id' as const },
+      { name: 'returns content by filename', lookupBy: 'filename' as const },
+    ];
+
+    it.each(cases)('$name', async ({ lookupBy }) => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# My Content\nLine 2');
+        const ref = lookupBy === 'id' ? id : 'doc.md';
+        const content = storage.readArtifactContent('ws', ref);
+        expect(content).toBe('# My Content\nLine 2');
+      });
+    });
+
+    it('returns null for non-existent artifact', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(storage.readArtifactContent('ws', 'nonexistent')).toBeNull();
+      });
+    });
+
+    it('returns null when metadata exists but file is missing', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Content');
+        // Manually delete the file but leave metadata
+        fs.unlinkSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'doc.md'));
+        expect(storage.readArtifactContent('ws', id)).toBeNull();
+      });
+    });
+  });
+
+  describe('updateArtifact', () => {
+    it('updates description and refreshes summary', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc');
+        storage.updateArtifact('ws', id, { description: 'Updated desc' });
+
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.description).toBe('Updated desc');
+
+        // Verify JSONL has new entry appended
+        const jsonl = fs.readFileSync(path.join(brainPath, 'workspaces', 'ws', 'artifacts.jsonl'), 'utf-8').trim();
+        const lines = jsonl.split('\n');
+        expect(lines.length).toBe(2); // original + update
+
+        // Verify workspace.json summary refreshed
+        const ws = storage.readWorkspace('ws');
+        expect(ws!.artifacts[0].description).toBe('Updated desc');
+      });
+    });
+
+    it('updates tags while preserving other fields', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc-PLAN.md', '# Doc', { description: 'Original' });
+        storage.updateArtifact('ws', id, { tags: ['new-tag'] });
+
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.tags).toEqual(['new-tag']);
+        expect(entry!.description).toBe('Original');
+        expect(entry!.type).toBe('plan');
+      });
+    });
+
+    it('updates areas', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc');
+        storage.updateArtifact('ws', id, { areas: ['infra', 'networking'] });
+
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.areas).toEqual(['infra', 'networking']);
+      });
+    });
+
+    it('throws ArtifactNotFoundError for non-existent ID', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(() => storage.updateArtifact('ws', 'nonexistent', { description: 'x' }))
+          .toThrow(ArtifactNotFoundError);
+      });
+    });
+
+    it('ignores filename change in updates to prevent desync', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'original.md', '# Original');
+        storage.updateArtifact('ws', id, { filename: 'renamed.md' } as Partial<import('../../src/core/types.js').ArtifactEntry>);
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.filename).toBe('original.md');
+        // File on disk should still be original.md
+        expect(fs.existsSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'original.md'))).toBe(true);
+      });
+    });
+  });
+
+  describe('syncArtifacts', () => {
+    it('returns empty results when no docs/ dir and no artifacts.jsonl', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const result = storage.syncArtifacts('ws');
+        expect(result.tracked).toEqual([]);
+        expect(result.untracked).toEqual([]);
+        expect(result.missing).toEqual([]);
+      });
+    });
+
+    it('reports all files as tracked when all have metadata', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'one.md', '# One');
+        storage.addArtifact('ws', 'two.md', '# Two');
+        const result = storage.syncArtifacts('ws');
+        expect(result.tracked).toHaveLength(2);
+        expect(result.untracked).toEqual([]);
+        expect(result.missing).toEqual([]);
+      });
+    });
+
+    it('reports untracked .md files in docs/', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        fs.mkdirSync(docsDir, { recursive: true });
+        fs.writeFileSync(path.join(docsDir, 'mystery.md'), '# Mystery');
+        const result = storage.syncArtifacts('ws');
+        expect(result.untracked).toEqual(['mystery.md']);
+        expect(result.tracked).toEqual([]);
+      });
+    });
+
+    it('ignores non-.md files in docs/', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        fs.mkdirSync(docsDir, { recursive: true });
+        fs.writeFileSync(path.join(docsDir, 'script.sh'), '#!/bin/bash');
+        const result = storage.syncArtifacts('ws');
+        expect(result.untracked).toEqual([]);
+      });
+    });
+
+    it('reports missing when metadata exists but file deleted', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'gone.md', '# Gone');
+        fs.unlinkSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'gone.md'));
+        const result = storage.syncArtifacts('ws');
+        expect(result.missing).toHaveLength(1);
+        expect(result.missing[0].filename).toBe('gone.md');
+        expect(result.tracked).toEqual([]);
+      });
+    });
+
+    it('handles mix of tracked, untracked, and missing', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        // tracked
+        storage.addArtifact('ws', 'tracked.md', '# Tracked');
+        // missing (metadata but no file)
+        storage.addArtifact('ws', 'missing.md', '# Missing');
+        fs.unlinkSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'missing.md'));
+        // untracked (file but no metadata)
+        fs.writeFileSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'untracked.md'), '# Untracked');
+
+        const result = storage.syncArtifacts('ws');
+        expect(result.tracked).toHaveLength(1);
+        expect(result.tracked[0].filename).toBe('tracked.md');
+        expect(result.untracked).toEqual(['untracked.md']);
+        expect(result.missing).toHaveLength(1);
+        expect(result.missing[0].filename).toBe('missing.md');
+      });
     });
   });
 });

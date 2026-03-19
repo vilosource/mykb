@@ -5,12 +5,15 @@ import type {
   Workspace,
   WorkspaceState,
   WorkspaceLinks,
-  WorkspaceDocument,
   WorkspaceStorage,
   CreateWorkspaceOptions,
   JournalEntry,
+  AddArtifactOptions,
+  ArtifactEntry,
+  ArtifactSyncResult,
 } from './types.js';
-import { WorkspaceNotFoundError } from './errors.js';
+import { WorkspaceNotFoundError, EntryValidationError, ArtifactNotFoundError } from './errors.js';
+import { generateId } from './id.js';
 
 export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   private readonly workspacesDir: string;
@@ -52,7 +55,15 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   private readWorkspaceFile(id: string): Workspace | null {
     const file = this.workspaceFile(id);
     if (!fs.existsSync(file)) return null;
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as Workspace;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>;
+
+    // Backward compat: migrate documents → artifacts
+    if (!('artifacts' in raw)) {
+      raw.artifacts = [];
+      delete raw.documents;
+    }
+
+    return raw as unknown as Workspace;
   }
 
   private writeWorkspaceFile(id: string, ws: Workspace): void {
@@ -76,7 +87,7 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
       state: {},
       areas: options?.areas ?? [],
       links: options?.links ?? {},
-      documents: [],
+      artifacts: [],
       created: now,
       updated: now,
     };
@@ -214,39 +225,36 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     return entries;
   }
 
-  scanDocumentIndex(id: string): WorkspaceDocument[] {
-    const dir = this.workspaceDir(id);
-    if (!fs.existsSync(dir)) return [];
+  // --- Artifact methods ---
 
-    return this.scanDirForDocs(dir, dir);
+  private docsDir(id: string): string {
+    return path.join(this.workspaceDir(id), 'docs');
   }
 
-  private scanDirForDocs(baseDir: string, currentDir: string): WorkspaceDocument[] {
-    const docs: WorkspaceDocument[] = [];
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+  private artifactsFile(id: string): string {
+    return path.join(this.workspaceDir(id), 'artifacts.jsonl');
+  }
 
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry.name);
-
-      if (entry.isDirectory()) {
-        docs.push(...this.scanDirForDocs(baseDir, fullPath));
-        continue;
-      }
-
-      if (!entry.name.endsWith('.md')) continue;
-
-      const relativePath = path.relative(baseDir, fullPath);
-      const description = this.extractFrontmatterDescription(fullPath);
-      docs.push({ path: relativePath, description });
+  private inferArtifactType(filename: string): import('./types.js').ArtifactType {
+    const suffixMap: [RegExp, import('./types.js').ArtifactType][] = [
+      [/-plan\.md$/i, 'plan'],
+      [/-design\.md$/i, 'design'],
+      [/-analysis\.md$/i, 'analysis'],
+      [/-architecture\.md$/i, 'design'],
+      [/-guide\.md$/i, 'report'],
+      [/-specification\.md$/i, 'design'],
+      [/-strategy\.md$/i, 'plan'],
+      [/-proposal\.md$/i, 'notes'],
+      [/-implementation\.md$/i, 'plan'],
+    ];
+    for (const [pattern, type] of suffixMap) {
+      if (pattern.test(filename)) return type;
     }
-
-    return docs;
+    return 'other';
   }
 
-  private extractFrontmatterDescription(filePath: string): string | null {
-    const content = fs.readFileSync(filePath, 'utf-8');
+  private extractDescriptionFromContent(content: string): string | null {
     const lines = content.split('\n').slice(0, 10);
-
     if (lines[0] !== '---') return null;
 
     let inFrontmatter = false;
@@ -256,22 +264,185 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
           inFrontmatter = true;
           continue;
         }
-        break; // closing delimiter
+        break;
       }
-
       if (inFrontmatter) {
         const match = line.match(/^description:\s*(.+)$/);
         if (match) return match[1].trim();
       }
     }
-
     return null;
   }
 
-  updateDocumentIndex(id: string): void {
+  private refreshArtifactSummaries(id: string): void {
     const ws = this.requireWorkspace(id);
-    ws.documents = this.scanDocumentIndex(id);
+    const artifacts = this.listArtifacts(id);
+    ws.artifacts = artifacts.map((a) => ({
+      id: a.id,
+      filename: a.filename,
+      type: a.type,
+      description: a.description,
+    }));
     ws.updated = new Date().toISOString();
     this.writeWorkspaceFile(id, ws);
+  }
+
+  addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string {
+    this.requireWorkspace(workspaceId);
+
+    if (!filename.endsWith('.md')) {
+      throw new EntryValidationError(`Filename must end with .md: ${filename}`);
+    }
+
+    // Reject path separators to prevent directory traversal
+    if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+      throw new EntryValidationError(`Filename must not contain path separators: ${filename}`);
+    }
+
+    // Check for duplicate filename in metadata
+    const existing = this.listArtifacts(workspaceId);
+    if (existing.some((a) => a.filename === filename)) {
+      throw new EntryValidationError(`Artifact '${filename}' already exists`);
+    }
+
+    // Ensure docs/ dir exists and write file
+    const docsDir = this.docsDir(workspaceId);
+    this.ensureDir(docsDir);
+    const filePath = path.join(docsDir, filename);
+    if (fs.existsSync(filePath)) {
+      // Register-only mode: file already on disk, just register metadata
+    } else {
+      // Exclusive create: prevents race condition where two processes both
+      // pass the duplicate check and try to write the same file
+      try {
+        fs.writeFileSync(filePath, content, { flag: 'wx' });
+      } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new EntryValidationError(`Artifact '${filename}' already exists`);
+        }
+        throw e;
+      }
+    }
+
+    const id = generateId();
+    const now = new Date().toISOString();
+    const entry: ArtifactEntry = {
+      id,
+      filename,
+      type: options?.type ?? this.inferArtifactType(filename),
+      description: options?.description ?? this.extractDescriptionFromContent(content) ?? '',
+      tags: options?.tags ?? [],
+      areas: options?.areas ?? [],
+      created: now,
+      updated: now,
+    };
+
+    fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(entry) + '\n');
+    this.refreshArtifactSummaries(workspaceId);
+    return id;
+  }
+
+  listArtifacts(workspaceId: string): ArtifactEntry[] {
+    const file = this.artifactsFile(workspaceId);
+    if (!fs.existsSync(file)) return [];
+
+    const content = fs.readFileSync(file, 'utf-8').trim();
+    if (!content) return [];
+
+    // Resolve tombstones: last entry per ID wins
+    const byId = new Map<string, ArtifactEntry | null>();
+    for (const line of content.split('\n')) {
+      const parsed = JSON.parse(line) as ArtifactEntry & { deleted?: true };
+      if (parsed.deleted) {
+        byId.set(parsed.id, null);
+      } else {
+        byId.set(parsed.id, parsed);
+      }
+    }
+
+    const result: ArtifactEntry[] = [];
+    for (const entry of byId.values()) {
+      if (entry !== null) result.push(entry);
+    }
+    return result;
+  }
+
+  readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null {
+    const artifacts = this.listArtifacts(workspaceId);
+    // ID takes precedence over filename (D6)
+    return artifacts.find((a) => a.id === idOrFilename)
+      ?? artifacts.find((a) => a.filename === idOrFilename)
+      ?? null;
+  }
+
+  deleteArtifact(workspaceId: string, id: string): void {
+    const entry = this.readArtifact(workspaceId, id);
+    if (!entry) {
+      throw new ArtifactNotFoundError(`Artifact not found: ${id}`);
+    }
+    // Append tombstone
+    const tombstone = { id: entry.id, deleted: true, updated: new Date().toISOString() };
+    fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(tombstone) + '\n');
+    // Remove file
+    const filePath = path.join(this.docsDir(workspaceId), entry.filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    this.refreshArtifactSummaries(workspaceId);
+  }
+
+  readArtifactContent(workspaceId: string, idOrFilename: string): string | null {
+    const entry = this.readArtifact(workspaceId, idOrFilename);
+    if (!entry) return null;
+    const filePath = path.join(this.docsDir(workspaceId), entry.filename);
+    if (!fs.existsSync(filePath)) return null;
+    return fs.readFileSync(filePath, 'utf-8');
+  }
+
+  updateArtifact(workspaceId: string, id: string, updates: Partial<ArtifactEntry>): void {
+    const entry = this.readArtifact(workspaceId, id);
+    if (!entry) throw new ArtifactNotFoundError(`Artifact not found: ${id}`);
+
+    const updated: ArtifactEntry = {
+      ...entry,
+      ...updates,
+      id: entry.id, // never allow ID change
+      filename: entry.filename, // never allow filename change (would desync from file on disk)
+      updated: new Date().toISOString(),
+    };
+    fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(updated) + '\n');
+    this.refreshArtifactSummaries(workspaceId);
+  }
+
+  syncArtifacts(workspaceId: string): ArtifactSyncResult {
+    const docsDir = this.docsDir(workspaceId);
+    const artifacts = this.listArtifacts(workspaceId);
+    const trackedFilenames = new Set(artifacts.map((a) => a.filename));
+
+    // Scan docs/ for .md files
+    const filesOnDisk = new Set<string>();
+    if (fs.existsSync(docsDir)) {
+      for (const entry of fs.readdirSync(docsDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        filesOnDisk.add(entry.name);
+      }
+    }
+
+    const tracked: ArtifactEntry[] = [];
+    const missing: ArtifactEntry[] = [];
+    for (const artifact of artifacts) {
+      if (filesOnDisk.has(artifact.filename)) {
+        tracked.push(artifact);
+      } else {
+        missing.push(artifact);
+      }
+    }
+
+    const untracked: string[] = [];
+    for (const file of filesOnDisk) {
+      if (!trackedFilenames.has(file)) {
+        untracked.push(file);
+      }
+    }
+
+    return { tracked, untracked, missing };
   }
 }

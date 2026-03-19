@@ -158,6 +158,47 @@ export interface SearchEngine {
   matchAreas(text: string): { area: string; score: number }[];
 }
 
+// --- Artifact types ---
+
+export type ArtifactType = 'plan' | 'design' | 'analysis' | 'report' | 'notes' | 'prompt' | 'other';
+
+export type ArtifactEntry = {
+  id: string;
+  filename: string;
+  type: ArtifactType;
+  description: string;
+  tags: string[];
+  areas: string[];
+  created: string;
+  updated: string;
+};
+
+export type ArtifactTombstone = {
+  id: string;
+  deleted: true;
+  updated: string;
+};
+
+export type ArtifactSummary = {
+  id: string;
+  filename: string;
+  type: ArtifactType;
+  description: string;
+};
+
+export type AddArtifactOptions = {
+  type?: ArtifactType;
+  description?: string;
+  tags?: string[];
+  areas?: string[];
+};
+
+export type ArtifactSyncResult = {
+  tracked: ArtifactEntry[];
+  untracked: string[];
+  missing: ArtifactEntry[];
+};
+
 // --- Workspace types ---
 
 export type WorkspaceState = {
@@ -173,18 +214,13 @@ export type WorkspaceLinks = {
   repos?: string[];
 };
 
-export type WorkspaceDocument = {
-  path: string;
-  description: string | null;
-};
-
 export type Workspace = {
   id: string;
   name: string;
   state: WorkspaceState;
   areas: string[];
   links: WorkspaceLinks;
-  documents: WorkspaceDocument[];
+  artifacts: ArtifactSummary[];
   created: string;
   updated: string;
 };
@@ -213,6 +249,12 @@ export interface WorkspaceStorage {
   clearActiveWorkspaceId(): void;
   appendJournal(id: string, text: string): void;
   readJournal(id: string, limit?: number): JournalEntry[];
-  scanDocumentIndex(id: string): WorkspaceDocument[];
-  updateDocumentIndex(id: string): void;
+  // Artifact CRUD
+  addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string;
+  readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null;
+  readArtifactContent(workspaceId: string, idOrFilename: string): string | null;
+  updateArtifact(workspaceId: string, id: string, updates: Partial<ArtifactEntry>): void;
+  deleteArtifact(workspaceId: string, id: string): void;
+  listArtifacts(workspaceId: string): ArtifactEntry[];
+  syncArtifacts(workspaceId: string): ArtifactSyncResult;
 }
