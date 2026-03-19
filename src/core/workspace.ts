@@ -13,7 +13,8 @@ import type {
   ArtifactEntry,
   ArtifactSyncResult,
 } from './types.js';
-import { WorkspaceNotFoundError } from './errors.js';
+import { WorkspaceNotFoundError, EntryValidationError, ArtifactNotFoundError } from './errors.js';
+import { generateId } from './id.js';
 
 export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   private readonly workspacesDir: string;
@@ -287,29 +288,158 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     this.writeWorkspaceFile(id, ws);
   }
 
-  // --- Artifact stubs (replaced in Phases 2-4) ---
+  // --- Artifact methods ---
 
-  addArtifact(_workspaceId: string, _filename: string, _content: string, _options?: AddArtifactOptions): string {
-    throw new Error('Not implemented');
+  private docsDir(id: string): string {
+    return path.join(this.workspaceDir(id), 'docs');
   }
 
-  readArtifact(_workspaceId: string, _idOrFilename: string): ArtifactEntry | null {
-    throw new Error('Not implemented');
+  private artifactsFile(id: string): string {
+    return path.join(this.workspaceDir(id), 'artifacts.jsonl');
   }
+
+  private inferArtifactType(filename: string): import('./types.js').ArtifactType {
+    const suffixMap: [RegExp, import('./types.js').ArtifactType][] = [
+      [/-plan\.md$/i, 'plan'],
+      [/-design\.md$/i, 'design'],
+      [/-analysis\.md$/i, 'analysis'],
+      [/-architecture\.md$/i, 'design'],
+      [/-guide\.md$/i, 'report'],
+      [/-specification\.md$/i, 'design'],
+      [/-strategy\.md$/i, 'plan'],
+      [/-proposal\.md$/i, 'notes'],
+      [/-implementation\.md$/i, 'plan'],
+    ];
+    for (const [pattern, type] of suffixMap) {
+      if (pattern.test(filename)) return type;
+    }
+    return 'other';
+  }
+
+  private extractDescriptionFromContent(content: string): string | null {
+    const lines = content.split('\n').slice(0, 10);
+    if (lines[0] !== '---') return null;
+
+    let inFrontmatter = false;
+    for (const line of lines) {
+      if (line === '---') {
+        if (!inFrontmatter) {
+          inFrontmatter = true;
+          continue;
+        }
+        break;
+      }
+      if (inFrontmatter) {
+        const match = line.match(/^description:\s*(.+)$/);
+        if (match) return match[1].trim();
+      }
+    }
+    return null;
+  }
+
+  private refreshArtifactSummaries(id: string): void {
+    const ws = this.requireWorkspace(id);
+    const artifacts = this.listArtifacts(id);
+    ws.artifacts = artifacts.map((a) => ({
+      id: a.id,
+      filename: a.filename,
+      type: a.type,
+      description: a.description,
+    }));
+    ws.updated = new Date().toISOString();
+    this.writeWorkspaceFile(id, ws);
+  }
+
+  addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string {
+    this.requireWorkspace(workspaceId);
+
+    if (!filename.endsWith('.md')) {
+      throw new EntryValidationError(`Filename must end with .md: ${filename}`);
+    }
+
+    // Check for duplicate filename
+    const existing = this.listArtifacts(workspaceId);
+    if (existing.some((a) => a.filename === filename)) {
+      throw new EntryValidationError(`Artifact '${filename}' already exists`);
+    }
+
+    // Ensure docs/ dir exists and write file
+    const docsDir = this.docsDir(workspaceId);
+    this.ensureDir(docsDir);
+    fs.writeFileSync(path.join(docsDir, filename), content);
+
+    const id = generateId();
+    const now = new Date().toISOString();
+    const entry: ArtifactEntry = {
+      id,
+      filename,
+      type: options?.type ?? this.inferArtifactType(filename),
+      description: options?.description ?? this.extractDescriptionFromContent(content) ?? '',
+      tags: options?.tags ?? [],
+      areas: options?.areas ?? [],
+      created: now,
+      updated: now,
+    };
+
+    fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(entry) + '\n');
+    this.refreshArtifactSummaries(workspaceId);
+    return id;
+  }
+
+  listArtifacts(workspaceId: string): ArtifactEntry[] {
+    const file = this.artifactsFile(workspaceId);
+    if (!fs.existsSync(file)) return [];
+
+    const content = fs.readFileSync(file, 'utf-8').trim();
+    if (!content) return [];
+
+    // Resolve tombstones: last entry per ID wins
+    const byId = new Map<string, ArtifactEntry | null>();
+    for (const line of content.split('\n')) {
+      const parsed = JSON.parse(line) as ArtifactEntry & { deleted?: true };
+      if (parsed.deleted) {
+        byId.set(parsed.id, null);
+      } else {
+        byId.set(parsed.id, parsed);
+      }
+    }
+
+    const result: ArtifactEntry[] = [];
+    for (const entry of byId.values()) {
+      if (entry !== null) result.push(entry);
+    }
+    return result;
+  }
+
+  readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null {
+    const artifacts = this.listArtifacts(workspaceId);
+    // ID takes precedence over filename (D6)
+    return artifacts.find((a) => a.id === idOrFilename)
+      ?? artifacts.find((a) => a.filename === idOrFilename)
+      ?? null;
+  }
+
+  deleteArtifact(workspaceId: string, id: string): void {
+    const entry = this.readArtifact(workspaceId, id);
+    if (!entry) {
+      throw new ArtifactNotFoundError(`Artifact not found: ${id}`);
+    }
+    // Append tombstone
+    const tombstone = { id: entry.id, deleted: true, updated: new Date().toISOString() };
+    fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(tombstone) + '\n');
+    // Remove file
+    const filePath = path.join(this.docsDir(workspaceId), entry.filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    this.refreshArtifactSummaries(workspaceId);
+  }
+
+  // --- Artifact stubs (replaced in Phases 3-4) ---
 
   readArtifactContent(_workspaceId: string, _idOrFilename: string): string | null {
     throw new Error('Not implemented');
   }
 
   updateArtifact(_workspaceId: string, _id: string, _updates: Partial<ArtifactEntry>): void {
-    throw new Error('Not implemented');
-  }
-
-  deleteArtifact(_workspaceId: string, _id: string): void {
-    throw new Error('Not implemented');
-  }
-
-  listArtifacts(_workspaceId: string): ArtifactEntry[] {
     throw new Error('Not implemented');
   }
 

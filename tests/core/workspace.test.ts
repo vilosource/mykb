@@ -5,7 +5,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withTempBrain } from '../helpers.js';
 import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
-import type { Workspace, WorkspaceState } from '../../src/core/types.js';
+import type { Workspace, WorkspaceState, ArtifactEntry } from '../../src/core/types.js';
+import { EntryValidationError } from '../../src/core/errors.js';
 
 describe('FileSystemWorkspaceStorage CRUD', () => {
   it('createWorkspace creates workspace.json with correct structure', async () => {
@@ -445,6 +446,177 @@ describe('FileSystemWorkspaceStorage Document Index', () => {
       expect(raw.documents).toHaveLength(1);
       expect(raw.documents[0].path).toBe('readme.md');
       expect(raw.documents[0].description).toBe('Project readme');
+    });
+  });
+});
+
+describe('FileSystemWorkspaceStorage Artifacts', () => {
+  describe('addArtifact', () => {
+    const typeInferenceCases = [
+      { name: 'infers plan from -PLAN suffix', filename: 'migration-PLAN.md', expectedType: 'plan' },
+      { name: 'infers design from -DESIGN suffix', filename: 'arch-DESIGN.md', expectedType: 'design' },
+      { name: 'infers analysis from -ANALYSIS suffix', filename: 'risk-ANALYSIS.md', expectedType: 'analysis' },
+      { name: 'infers design from -ARCHITECTURE suffix', filename: 'sys-ARCHITECTURE.md', expectedType: 'design' },
+      { name: 'infers report from -GUIDE suffix', filename: 'ops-GUIDE.md', expectedType: 'report' },
+      { name: 'infers other when no matching suffix', filename: 'notes.md', expectedType: 'other' },
+      { name: 'infers type case-insensitively', filename: 'foo-plan.md', expectedType: 'plan' },
+    ];
+
+    it.each(typeInferenceCases)('$name', async ({ filename, expectedType }) => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', filename, '# Content');
+        const entry = storage.readArtifact('ws', id);
+        expect(entry).not.toBeNull();
+        expect(entry!.type).toBe(expectedType);
+      });
+    });
+
+    it('writes file to docs/, creates artifacts.jsonl entry, updates workspace.json, returns id', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'notes-PLAN.md', '# Notes');
+
+        expect(typeof id).toBe('string');
+        expect(id.length).toBeGreaterThan(0);
+
+        // File written to docs/
+        const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
+        expect(fs.existsSync(path.join(docsDir, 'notes-PLAN.md'))).toBe(true);
+        expect(fs.readFileSync(path.join(docsDir, 'notes-PLAN.md'), 'utf-8')).toBe('# Notes');
+
+        // Entry in artifacts.jsonl
+        const jsonlFile = path.join(brainPath, 'workspaces', 'ws', 'artifacts.jsonl');
+        expect(fs.existsSync(jsonlFile)).toBe(true);
+        const lines = fs.readFileSync(jsonlFile, 'utf-8').trim().split('\n');
+        const entry = JSON.parse(lines[0]) as ArtifactEntry;
+        expect(entry.id).toBe(id);
+        expect(entry.filename).toBe('notes-PLAN.md');
+        expect(entry.type).toBe('plan');
+
+        // workspace.json artifacts updated
+        const ws = storage.readWorkspace('ws');
+        expect(ws!.artifacts).toHaveLength(1);
+        expect(ws!.artifacts[0].id).toBe(id);
+        expect(ws!.artifacts[0].filename).toBe('notes-PLAN.md');
+      });
+    });
+
+    it('explicit type overrides inference', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'foo.md', '# Foo', { type: 'analysis' });
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.type).toBe('analysis');
+      });
+    });
+
+    const descriptionCases = [
+      {
+        name: 'extracts description from frontmatter',
+        content: '---\ndescription: My desc\n---\n# Content',
+        options: {},
+        expectedDesc: 'My desc',
+      },
+      {
+        name: 'explicit description overrides frontmatter',
+        content: '---\ndescription: From frontmatter\n---\n# Content',
+        options: { description: 'Override' },
+        expectedDesc: 'Override',
+      },
+      {
+        name: 'no frontmatter and no explicit description defaults to empty string',
+        content: '# Just content',
+        options: {},
+        expectedDesc: '',
+      },
+    ];
+
+    it.each(descriptionCases)('$name', async ({ content, options, expectedDesc }) => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', content, options);
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.description).toBe(expectedDesc);
+      });
+    });
+
+    it('sets tags and areas from options', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc', { tags: ['t1', 't2'], areas: ['infra'] });
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.tags).toEqual(['t1', 't2']);
+        expect(entry!.areas).toEqual(['infra']);
+      });
+    });
+
+    it('defaults tags and areas to empty arrays', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc');
+        const entry = storage.readArtifact('ws', id);
+        expect(entry!.tags).toEqual([]);
+        expect(entry!.areas).toEqual([]);
+      });
+    });
+
+    it('rejects non-.md filename', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(() => storage.addArtifact('ws', 'script.sh', '#!/bin/bash')).toThrow(EntryValidationError);
+      });
+    });
+
+    it('rejects duplicate filename', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'doc.md', '# First');
+        expect(() => storage.addArtifact('ws', 'doc.md', '# Second')).toThrow(EntryValidationError);
+      });
+    });
+  });
+
+  describe('listArtifacts', () => {
+    it('returns empty array when no artifacts.jsonl exists', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        expect(storage.listArtifacts('ws')).toEqual([]);
+      });
+    });
+
+    it('returns all added artifacts', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        storage.addArtifact('ws', 'one-PLAN.md', '# One');
+        storage.addArtifact('ws', 'two-DESIGN.md', '# Two');
+        const list = storage.listArtifacts('ws');
+        expect(list).toHaveLength(2);
+        expect(list.map((a) => a.filename)).toEqual(['one-PLAN.md', 'two-DESIGN.md']);
+      });
+    });
+
+    it('excludes deleted artifacts', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('ws', 'Test');
+        const id = storage.addArtifact('ws', 'doomed.md', '# Doomed');
+        storage.addArtifact('ws', 'keeper.md', '# Keeper');
+        storage.deleteArtifact('ws', id);
+        const list = storage.listArtifacts('ws');
+        expect(list).toHaveLength(1);
+        expect(list[0].filename).toBe('keeper.md');
+      });
     });
   });
 });
