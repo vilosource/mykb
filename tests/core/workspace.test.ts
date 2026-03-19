@@ -22,7 +22,7 @@ describe('FileSystemWorkspaceStorage CRUD', () => {
       expect(data.state).toEqual({});
       expect(data.areas).toEqual([]);
       expect(data.links).toEqual({});
-      expect(data.documents).toEqual([]);
+      expect(data.artifacts).toEqual([]);
       expect(data.created).toBeDefined();
       expect(data.updated).toBeDefined();
     });
@@ -56,7 +56,7 @@ describe('FileSystemWorkspaceStorage CRUD', () => {
       expect(ws!.state).toEqual({});
       expect(ws!.areas).toEqual([]);
       expect(ws!.links).toEqual({});
-      expect(ws!.documents).toEqual([]);
+      expect(ws!.artifacts).toEqual([]);
       expect(typeof ws!.created).toBe('string');
       expect(typeof ws!.updated).toBe('string');
     });
@@ -298,6 +298,56 @@ describe('FileSystemWorkspaceStorage Journal', () => {
   });
 });
 
+describe('FileSystemWorkspaceStorage Backward Compat (documents → artifacts)', () => {
+  const cases = [
+    {
+      name: 'workspace.json with documents field migrates to artifacts: []',
+      setup: (raw: Record<string, unknown>) => {
+        delete raw.artifacts;
+        raw.documents = [{ path: 'old.md', description: 'legacy doc' }];
+      },
+      expectArtifacts: [],
+      expectNoDocuments: true,
+    },
+    {
+      name: 'workspace.json with neither documents nor artifacts defaults to artifacts: []',
+      setup: (raw: Record<string, unknown>) => {
+        delete raw.artifacts;
+        delete raw.documents;
+      },
+      expectArtifacts: [],
+      expectNoDocuments: false,
+    },
+    {
+      name: 'workspace.json with artifacts field returns artifacts as-is',
+      setup: (raw: Record<string, unknown>) => {
+        raw.artifacts = [{ id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' }];
+      },
+      expectArtifacts: [{ id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' }],
+      expectNoDocuments: false,
+    },
+  ];
+
+  it.each(cases)('$name', async ({ setup, expectArtifacts, expectNoDocuments }) => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('compat-test', 'Compat Test');
+
+      const wsFile = path.join(brainPath, 'workspaces', 'compat-test', 'workspace.json');
+      const raw = JSON.parse(fs.readFileSync(wsFile, 'utf-8'));
+      setup(raw);
+      fs.writeFileSync(wsFile, JSON.stringify(raw, null, 2) + '\n');
+
+      const ws = storage.readWorkspace('compat-test');
+      expect(ws).not.toBeNull();
+      expect(ws!.artifacts).toEqual(expectArtifacts);
+      if (expectNoDocuments) {
+        expect((ws as Record<string, unknown>).documents).toBeUndefined();
+      }
+    });
+  });
+});
+
 describe('FileSystemWorkspaceStorage Document Index', () => {
   it('scanDocumentIndex with no docs returns empty array', async () => {
     await withTempBrain(async (brainPath) => {
@@ -390,11 +440,11 @@ describe('FileSystemWorkspaceStorage Document Index', () => {
 
       storage.updateDocumentIndex('my-proj');
 
-      const ws = storage.readWorkspace('my-proj');
-      expect(ws).not.toBeNull();
-      expect(ws!.documents).toHaveLength(1);
-      expect(ws!.documents[0].path).toBe('readme.md');
-      expect(ws!.documents[0].description).toBe('Project readme');
+      // Read raw file — readWorkspace migrates documents away, so check disk directly
+      const raw = JSON.parse(fs.readFileSync(path.join(wsDir, 'workspace.json'), 'utf-8'));
+      expect(raw.documents).toHaveLength(1);
+      expect(raw.documents[0].path).toBe('readme.md');
+      expect(raw.documents[0].description).toBe('Project readme');
     });
   });
 });

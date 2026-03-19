@@ -140,9 +140,9 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     },
     areas: ['stark', 'infra-vm'],
     links: { jira: 'STARK-653', wiki: 'https://wiki.example.com' },
-    documents: [
-      { path: 'docs/server-inventory.md', description: 'VM specs and IPs' },
-      { path: 'backlog/items.md', description: null },
+    artifacts: [
+      { id: 'abc12345', filename: 'docs/server-inventory.md', type: 'design', description: 'VM specs and IPs' },
+      { id: 'def67890', filename: 'backlog/items.md', type: 'other', description: '' },
     ],
     created: '2026-03-14T00:00:00.000Z',
     updated: '2026-03-15T00:00:00.000Z',
@@ -180,7 +180,7 @@ describe('renderWorkspace', () => {
     expect(output).toContain('Wiki: https://wiki.example.com');
   });
 
-  it('renders documents with descriptions', () => {
+  it('renders artifacts with descriptions', () => {
     const ws = makeWorkspace();
     const output = renderWorkspace(ws, []);
     expect(output).toContain('docs/server-inventory.md');
@@ -209,8 +209,8 @@ describe('renderWorkspace', () => {
     expect(output).toContain('# Stark Dashboard (stark-picking)');
   });
 
-  it('renders workspace with no documents', () => {
-    const ws = makeWorkspace({ documents: [] });
+  it('renders workspace with no artifacts', () => {
+    const ws = makeWorkspace({ artifacts: [] });
     const output = renderWorkspace(ws, []);
     expect(output).not.toContain('Documents:');
   });

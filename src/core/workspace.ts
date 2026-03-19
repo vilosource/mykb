@@ -9,6 +9,9 @@ import type {
   WorkspaceStorage,
   CreateWorkspaceOptions,
   JournalEntry,
+  AddArtifactOptions,
+  ArtifactEntry,
+  ArtifactSyncResult,
 } from './types.js';
 import { WorkspaceNotFoundError } from './errors.js';
 
@@ -52,7 +55,15 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   private readWorkspaceFile(id: string): Workspace | null {
     const file = this.workspaceFile(id);
     if (!fs.existsSync(file)) return null;
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as Workspace;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>;
+
+    // Backward compat: migrate documents → artifacts
+    if (!('artifacts' in raw)) {
+      raw.artifacts = [];
+      delete raw.documents;
+    }
+
+    return raw as unknown as Workspace;
   }
 
   private writeWorkspaceFile(id: string, ws: Workspace): void {
@@ -76,7 +87,7 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
       state: {},
       areas: options?.areas ?? [],
       links: options?.links ?? {},
-      documents: [],
+      artifacts: [],
       created: now,
       updated: now,
     };
@@ -270,8 +281,39 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
 
   updateDocumentIndex(id: string): void {
     const ws = this.requireWorkspace(id);
-    ws.documents = this.scanDocumentIndex(id);
+    // Deprecated: writes to legacy 'documents' field. Removed in Phase 5b.
+    (ws as Record<string, unknown>).documents = this.scanDocumentIndex(id);
     ws.updated = new Date().toISOString();
     this.writeWorkspaceFile(id, ws);
+  }
+
+  // --- Artifact stubs (replaced in Phases 2-4) ---
+
+  addArtifact(_workspaceId: string, _filename: string, _content: string, _options?: AddArtifactOptions): string {
+    throw new Error('Not implemented');
+  }
+
+  readArtifact(_workspaceId: string, _idOrFilename: string): ArtifactEntry | null {
+    throw new Error('Not implemented');
+  }
+
+  readArtifactContent(_workspaceId: string, _idOrFilename: string): string | null {
+    throw new Error('Not implemented');
+  }
+
+  updateArtifact(_workspaceId: string, _id: string, _updates: Partial<ArtifactEntry>): void {
+    throw new Error('Not implemented');
+  }
+
+  deleteArtifact(_workspaceId: string, _id: string): void {
+    throw new Error('Not implemented');
+  }
+
+  listArtifacts(_workspaceId: string): ArtifactEntry[] {
+    throw new Error('Not implemented');
+  }
+
+  syncArtifacts(_workspaceId: string): ArtifactSyncResult {
+    throw new Error('Not implemented');
   }
 }

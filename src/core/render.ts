@@ -104,14 +104,14 @@ export function renderWorkspace(workspace: Workspace, journalEntries: JournalEnt
     lines.push(`Links: ${linkParts.join(' | ')}`);
   }
 
-  // Documents
-  if (workspace.documents.length > 0) {
+  // Artifacts
+  if (workspace.artifacts.length > 0) {
     lines.push('Documents:');
-    for (const doc of workspace.documents) {
+    for (const doc of workspace.artifacts) {
       if (doc.description) {
-        lines.push(`  - ${doc.path} — ${doc.description}`);
+        lines.push(`  - ${doc.filename} — ${doc.description}`);
       } else {
-        lines.push(`  - ${doc.path}`);
+        lines.push(`  - ${doc.filename}`);
       }
     }
   }
