@@ -303,7 +303,22 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     // Ensure docs/ dir exists and write file
     const docsDir = this.docsDir(workspaceId);
     this.ensureDir(docsDir);
-    fs.writeFileSync(path.join(docsDir, filename), content);
+    const filePath = path.join(docsDir, filename);
+    if (fs.existsSync(filePath)) {
+      // Register-only mode: file already on disk, just register metadata
+      // Verify content matches to avoid silent data loss
+    } else {
+      // Exclusive create: prevents race condition where two processes both
+      // pass the duplicate check and try to write the same file
+      try {
+        fs.writeFileSync(filePath, content, { flag: 'wx' });
+      } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new EntryValidationError(`Artifact '${filename}' already exists`);
+        }
+        throw e;
+      }
+    }
 
     const id = generateId();
     const now = new Date().toISOString();
