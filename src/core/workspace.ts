@@ -5,7 +5,6 @@ import type {
   Workspace,
   WorkspaceState,
   WorkspaceLinks,
-  WorkspaceDocument,
   WorkspaceStorage,
   CreateWorkspaceOptions,
   JournalEntry,
@@ -224,68 +223,6 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     }
 
     return entries;
-  }
-
-  scanDocumentIndex(id: string): WorkspaceDocument[] {
-    const dir = this.workspaceDir(id);
-    if (!fs.existsSync(dir)) return [];
-
-    return this.scanDirForDocs(dir, dir);
-  }
-
-  private scanDirForDocs(baseDir: string, currentDir: string): WorkspaceDocument[] {
-    const docs: WorkspaceDocument[] = [];
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry.name);
-
-      if (entry.isDirectory()) {
-        docs.push(...this.scanDirForDocs(baseDir, fullPath));
-        continue;
-      }
-
-      if (!entry.name.endsWith('.md')) continue;
-
-      const relativePath = path.relative(baseDir, fullPath);
-      const description = this.extractFrontmatterDescription(fullPath);
-      docs.push({ path: relativePath, description });
-    }
-
-    return docs;
-  }
-
-  private extractFrontmatterDescription(filePath: string): string | null {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n').slice(0, 10);
-
-    if (lines[0] !== '---') return null;
-
-    let inFrontmatter = false;
-    for (const line of lines) {
-      if (line === '---') {
-        if (!inFrontmatter) {
-          inFrontmatter = true;
-          continue;
-        }
-        break; // closing delimiter
-      }
-
-      if (inFrontmatter) {
-        const match = line.match(/^description:\s*(.+)$/);
-        if (match) return match[1].trim();
-      }
-    }
-
-    return null;
-  }
-
-  updateDocumentIndex(id: string): void {
-    const ws = this.requireWorkspace(id);
-    // Deprecated: writes to legacy 'documents' field. Removed in Phase 5b.
-    (ws as Record<string, unknown>).documents = this.scanDocumentIndex(id);
-    ws.updated = new Date().toISOString();
-    this.writeWorkspaceFile(id, ws);
   }
 
   // --- Artifact methods ---

@@ -25,7 +25,6 @@ export {
   type SearchEngine,
   type WorkspaceState,
   type WorkspaceLinks,
-  type WorkspaceDocument,
   type Workspace,
   type JournalEntry,
   type CreateWorkspaceOptions,

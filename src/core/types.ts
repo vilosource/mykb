@@ -214,11 +214,6 @@ export type WorkspaceLinks = {
   repos?: string[];
 };
 
-export type WorkspaceDocument = {
-  path: string;
-  description: string | null;
-};
-
 export type Workspace = {
   id: string;
   name: string;
@@ -254,9 +249,6 @@ export interface WorkspaceStorage {
   clearActiveWorkspaceId(): void;
   appendJournal(id: string, text: string): void;
   readJournal(id: string, limit?: number): JournalEntry[];
-  scanDocumentIndex(id: string): WorkspaceDocument[];
-  updateDocumentIndex(id: string): void;
-
   // Artifact CRUD
   addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string;
   readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null;
