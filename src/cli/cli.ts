@@ -574,8 +574,21 @@ workCmd
       process.exit(1);
     }
     storage.setActiveWorkspaceId(id);
+
+    // Auto-sync: register untracked .md files in docs/
+    const syncResult = storage.syncArtifacts(id);
+    if (syncResult.untracked.length > 0) {
+      const docsDir = path.join(resolveBrainPath(), 'workspaces', id, 'docs');
+      for (const f of syncResult.untracked) {
+        const content = fs.readFileSync(path.join(docsDir, f), 'utf-8');
+        storage.addArtifact(id, f, content);
+      }
+    }
+
+    // Re-read workspace to get updated artifacts
+    const updated = storage.readWorkspace(id)!;
     const journal = storage.readJournal(id, 3);
-    process.stdout.write(renderWorkspace(ws, journal));
+    process.stdout.write(renderWorkspace(updated, journal));
   });
 
 workCmd

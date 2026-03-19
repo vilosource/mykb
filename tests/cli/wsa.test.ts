@@ -279,3 +279,43 @@ describe('kb wsa CLI', () => {
     });
   });
 });
+
+describe('kb work start auto-sync', () => {
+  it('auto-registers untracked .md files in docs/ on work start', () => {
+    const docsDir = path.join(brainPath, 'workspaces', 'test-ws', 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(docsDir, 'auto-PLAN.md'),
+      '---\ndescription: Auto detected\n---\n# Auto\n',
+    );
+
+    // Re-start workspace — should auto-sync
+    const { stdout, exitCode } = runKb('work start test-ws');
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('auto-PLAN.md');
+    expect(stdout).toContain('Artifacts:');
+  });
+
+  it('works normally with no docs/ dir', () => {
+    const { stdout, exitCode } = runKb('work start test-ws');
+    expect(exitCode).toBe(0);
+    expect(stdout).not.toContain('Artifacts:');
+  });
+
+  it('shows existing tracked artifacts', () => {
+    runKb('wsa add tracked-DESIGN.md --desc "Tracked doc"', { stdin: '# Tracked' });
+    // Re-start to get fresh render
+    const { stdout, exitCode } = runKb('work start test-ws');
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('tracked-DESIGN.md');
+    expect(stdout).toContain('Tracked doc');
+  });
+
+  it('kb work show renders artifacts section', () => {
+    runKb('wsa add show-PLAN.md --desc "Show test"', { stdin: '# Show' });
+    const { stdout, exitCode } = runKb('work show test-ws');
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('show-PLAN.md');
+    expect(stdout).toContain('Show test');
+  });
+});
