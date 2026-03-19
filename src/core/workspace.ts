@@ -433,14 +433,26 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     this.refreshArtifactSummaries(workspaceId);
   }
 
-  // --- Artifact stubs (replaced in Phases 3-4) ---
-
-  readArtifactContent(_workspaceId: string, _idOrFilename: string): string | null {
-    throw new Error('Not implemented');
+  readArtifactContent(workspaceId: string, idOrFilename: string): string | null {
+    const entry = this.readArtifact(workspaceId, idOrFilename);
+    if (!entry) return null;
+    const filePath = path.join(this.docsDir(workspaceId), entry.filename);
+    if (!fs.existsSync(filePath)) return null;
+    return fs.readFileSync(filePath, 'utf-8');
   }
 
-  updateArtifact(_workspaceId: string, _id: string, _updates: Partial<ArtifactEntry>): void {
-    throw new Error('Not implemented');
+  updateArtifact(workspaceId: string, id: string, updates: Partial<ArtifactEntry>): void {
+    const entry = this.readArtifact(workspaceId, id);
+    if (!entry) throw new ArtifactNotFoundError(`Artifact not found: ${id}`);
+
+    const updated: ArtifactEntry = {
+      ...entry,
+      ...updates,
+      id: entry.id, // never allow ID change
+      updated: new Date().toISOString(),
+    };
+    fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(updated) + '\n');
+    this.refreshArtifactSummaries(workspaceId);
   }
 
   syncArtifacts(_workspaceId: string): ArtifactSyncResult {
