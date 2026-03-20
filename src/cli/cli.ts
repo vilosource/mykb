@@ -674,6 +674,56 @@ workCmd
   });
 
 workCmd
+  .command('note [text]')
+  .description('Add or list workspace notes')
+  .option('--tags <tags>', 'Comma-separated tags (e.g. bug,ux)')
+  .option('--tag <tag>', 'Filter notes by tag')
+  .action((text: string | undefined, opts: { tags?: string; tag?: string }) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+
+    if (!text) {
+      // List mode
+      const notes = storage.readNotes(activeId, opts.tag);
+      if (notes.length === 0) {
+        console.log(opts.tag ? `No notes with tag '${opts.tag}'` : 'No notes');
+        return;
+      }
+      for (const note of notes) {
+        const dateStr = note.date.split('T')[0];
+        const tagStr = note.tags.length > 0 ? ` [${note.tags.join(', ')}]` : '';
+        console.log(`- ${dateStr}${tagStr}: ${note.text}`);
+      }
+      return;
+    }
+
+    const tags = opts.tags ? opts.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
+    const noteId = storage.appendNote(activeId, text, tags);
+    const tagStr = tags.length > 0 ? ` [${tags.join(', ')}]` : '';
+    console.log(`Note added to '${activeId}'${tagStr} (${noteId})`);
+  });
+
+workCmd
+  .command('notes')
+  .description('List workspace notes (shorthand for: work note --tag)')
+  .option('--tag <tag>', 'Filter notes by tag')
+  .action((opts: { tag?: string }) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+
+    const notes = storage.readNotes(activeId, opts.tag);
+    if (notes.length === 0) {
+      console.log(opts.tag ? `No notes with tag '${opts.tag}'` : 'No notes');
+      return;
+    }
+    for (const note of notes) {
+      const dateStr = note.date.split('T')[0];
+      const tagStr = note.tags.length > 0 ? ` [${note.tags.join(', ')}]` : '';
+      console.log(`- ${dateStr}${tagStr}: ${note.text}`);
+    }
+  });
+
+workCmd
   .command('link <area>')
   .description('Link an area to active workspace')
   .action((area: string) => {

@@ -8,6 +8,7 @@ import { registerKbList } from './kb-list.js';
 import { registerKbVerify } from './kb-verify.js';
 import { registerKbWorkState } from './kb-work-state.js';
 import { registerKbWorkJournal } from './kb-work-journal.js';
+import { registerKbWorkNote } from './kb-work-note.js';
 
 export function registerTools(
   pi: ExtensionAPI,
@@ -24,5 +25,6 @@ export function registerTools(
   if (wsStorage) {
     registerKbWorkState(pi, wsStorage);
     registerKbWorkJournal(pi, wsStorage);
+    registerKbWorkNote(pi, wsStorage);
   }
 }

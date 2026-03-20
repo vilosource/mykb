@@ -299,6 +299,103 @@ describe('FileSystemWorkspaceStorage Journal', () => {
   });
 });
 
+describe('FileSystemWorkspaceStorage Notes', () => {
+  it('appendNote appends to notes.jsonl and returns id', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const id = storage.appendNote('my-proj', 'Login throws 500 on expired session', ['bug']);
+
+      expect(id).toBeDefined();
+      expect(typeof id).toBe('string');
+
+      const notesFile = path.join(brainPath, 'workspaces', 'my-proj', 'notes.jsonl');
+      expect(fs.existsSync(notesFile)).toBe(true);
+
+      const lines = fs.readFileSync(notesFile, 'utf-8').trim().split('\n');
+      expect(lines).toHaveLength(1);
+
+      const entry = JSON.parse(lines[0]) as { id: string; date: string; text: string; tags: string[] };
+      expect(entry.id).toBe(id);
+      expect(entry.text).toBe('Login throws 500 on expired session');
+      expect(entry.tags).toEqual(['bug']);
+      expect(entry.date).toBeDefined();
+    });
+  });
+
+  it('appendNote defaults to empty tags', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      storage.appendNote('my-proj', 'Something to remember');
+
+      const notes = storage.readNotes('my-proj');
+      expect(notes).toHaveLength(1);
+      expect(notes[0].tags).toEqual([]);
+    });
+  });
+
+  it('readNotes returns all notes', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      storage.appendNote('my-proj', 'First note', ['bug']);
+      storage.appendNote('my-proj', 'Second note', ['idea']);
+      storage.appendNote('my-proj', 'Third note', ['bug', 'ux']);
+
+      const notes = storage.readNotes('my-proj');
+      expect(notes).toHaveLength(3);
+      expect(notes[0].text).toBe('First note');
+      expect(notes[2].text).toBe('Third note');
+    });
+  });
+
+  it('readNotes filters by tag', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      storage.appendNote('my-proj', 'Login bug', ['bug']);
+      storage.appendNote('my-proj', 'Maybe use Redis', ['idea']);
+      storage.appendNote('my-proj', 'API inconsistency', ['bug', 'api']);
+
+      const bugs = storage.readNotes('my-proj', 'bug');
+      expect(bugs).toHaveLength(2);
+      expect(bugs[0].text).toBe('Login bug');
+      expect(bugs[1].text).toBe('API inconsistency');
+
+      const ideas = storage.readNotes('my-proj', 'idea');
+      expect(ideas).toHaveLength(1);
+      expect(ideas[0].text).toBe('Maybe use Redis');
+    });
+  });
+
+  it('readNotes with empty/no notes returns empty array', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const notes = storage.readNotes('my-proj');
+      expect(notes).toEqual([]);
+    });
+  });
+
+  it('readNotes with tag filter and no matches returns empty array', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      storage.appendNote('my-proj', 'A note', ['idea']);
+
+      const bugs = storage.readNotes('my-proj', 'bug');
+      expect(bugs).toEqual([]);
+    });
+  });
+});
+
 describe('FileSystemWorkspaceStorage Backward Compat (documents → artifacts)', () => {
   const cases = [
     {

@@ -8,6 +8,7 @@ import type {
   WorkspaceStorage,
   CreateWorkspaceOptions,
   JournalEntry,
+  NoteEntry,
   AddArtifactOptions,
   ArtifactEntry,
   ArtifactSyncResult,
@@ -46,6 +47,10 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
 
   private journalFile(id: string): string {
     return path.join(this.workspaceDir(id), 'journal.jsonl');
+  }
+
+  private notesFile(id: string): string {
+    return path.join(this.workspaceDir(id), 'notes.jsonl');
   }
 
   private ensureDir(dir: string): void {
@@ -220,6 +225,35 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
 
     if (limit !== undefined && limit > 0) {
       return entries.slice(-limit);
+    }
+
+    return entries;
+  }
+
+  appendNote(id: string, text: string, tags?: string[]): string {
+    this.requireWorkspace(id);
+    const noteId = generateId();
+    const entry: NoteEntry = {
+      id: noteId,
+      date: new Date().toISOString(),
+      text,
+      tags: tags ?? [],
+    };
+    fs.appendFileSync(this.notesFile(id), JSON.stringify(entry) + '\n');
+    return noteId;
+  }
+
+  readNotes(id: string, tag?: string): NoteEntry[] {
+    const file = this.notesFile(id);
+    if (!fs.existsSync(file)) return [];
+
+    const content = fs.readFileSync(file, 'utf-8').trim();
+    if (!content) return [];
+
+    const entries = content.split('\n').map((line) => JSON.parse(line) as NoteEntry);
+
+    if (tag) {
+      return entries.filter((e) => e.tags.includes(tag));
     }
 
     return entries;

@@ -171,6 +171,59 @@ describe('kb work CLI', () => {
     });
   });
 
+  describe('notes', () => {
+    beforeEach(() => {
+      runKb('work create test-ws "Test Workspace"');
+      runKb('work start test-ws');
+    });
+
+    it('adds a note with tags', () => {
+      const { stdout, exitCode } = runKb('work note "login throws 500" --tags bug,ux');
+      expect(exitCode).toBe(0);
+      expect(stdout.toLowerCase()).toContain('note');
+      expect(stdout).toContain('bug');
+    });
+
+    it('adds a note without tags', () => {
+      const { stdout, exitCode } = runKb('work note "just a thought"');
+      expect(exitCode).toBe(0);
+      expect(stdout.toLowerCase()).toContain('note');
+    });
+
+    it('lists all notes', () => {
+      runKb('work note "first bug" --tags bug');
+      runKb('work note "an idea" --tags idea');
+      const { stdout, exitCode } = runKb('work notes');
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('first bug');
+      expect(stdout).toContain('an idea');
+    });
+
+    it('filters notes by tag', () => {
+      runKb('work note "first bug" --tags bug');
+      runKb('work note "an idea" --tags idea');
+      runKb('work note "second bug" --tags bug');
+      const { stdout, exitCode } = runKb('work notes --tag bug');
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('first bug');
+      expect(stdout).toContain('second bug');
+      expect(stdout).not.toContain('an idea');
+    });
+
+    it('shows empty message when no notes', () => {
+      const { stdout, exitCode } = runKb('work notes');
+      expect(exitCode).toBe(0);
+      expect(stdout.toLowerCase()).toContain('no notes');
+    });
+
+    it('errors without active workspace', () => {
+      runKb('work stop');
+      const { stdout, exitCode } = runKb('work note "some text"');
+      expect(exitCode).toBe(1);
+      expect(stdout.toLowerCase()).toContain('no active workspace');
+    });
+  });
+
   describe('link and unlink', () => {
     beforeEach(() => {
       runKb('work create test-ws "Test" --areas net');

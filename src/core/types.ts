@@ -244,6 +244,13 @@ export type JournalEntry = {
   text: string;
 };
 
+export type NoteEntry = {
+  id: string;
+  date: string;
+  text: string;
+  tags: string[];
+};
+
 export type CreateWorkspaceOptions = {
   areas?: string[];
   links?: WorkspaceLinks;
@@ -263,6 +270,8 @@ export interface WorkspaceStorage {
   clearActiveWorkspaceId(): void;
   appendJournal(id: string, text: string): void;
   readJournal(id: string, limit?: number): JournalEntry[];
+  appendNote(id: string, text: string, tags?: string[]): string;
+  readNotes(id: string, tag?: string): NoteEntry[];
   // Artifact CRUD
   addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string;
   readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null;

@@ -27,6 +27,7 @@ export {
   type WorkspaceLinks,
   type Workspace,
   type JournalEntry,
+  type NoteEntry,
   type CreateWorkspaceOptions,
   type WorkspaceStorage,
 } from './types.js';
