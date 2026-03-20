@@ -262,4 +262,30 @@ describe('renderWorkspace', () => {
     const output = renderWorkspace(ws, []);
     expect(output).not.toContain('## Recent Journal');
   });
+
+  it('renders repo paths from links.repos', () => {
+    const ws = makeWorkspace({ links: { repos: ['/home/user/GitLab/my-project'] } });
+    const output = renderWorkspace(ws, []);
+    expect(output).toContain('Repos: /home/user/GitLab/my-project');
+  });
+
+  it('renders multiple repo paths', () => {
+    const ws = makeWorkspace({
+      links: { repos: ['/path/to/repo1', '/path/to/repo2'] },
+    });
+    const output = renderWorkspace(ws, []);
+    expect(output).toContain('Repos: /path/to/repo1, /path/to/repo2');
+  });
+
+  it('omits repos line when links.repos is empty', () => {
+    const ws = makeWorkspace({ links: { repos: [] } });
+    const output = renderWorkspace(ws, []);
+    expect(output).not.toContain('Repos:');
+  });
+
+  it('omits repos line when links.repos is undefined', () => {
+    const ws = makeWorkspace({ links: {} });
+    const output = renderWorkspace(ws, []);
+    expect(output).not.toContain('Repos:');
+  });
 });
