@@ -82,3 +82,100 @@ Same session, mykb workspace:
 - Could the area index nudge pattern backfire — agent sees the index, decides it doesn't need to load, and misses critical gotchas?
 - What's the token cost of including area knowledge in the cold start output? Does it meaningfully reduce the context window budget for actual work?
 - Are there workspace types (debugging sessions, quick fixes, exploration) where full context loading is wasteful?
+
+## Design Direction
+
+### The "hooks as nudges" principle
+
+mykb's design philosophy is "use hooks as nudges" — the system ensures the agent sees the right information at the right time, but the agent decides what to do with it. This sits at level 3 on the enforcement spectrum:
+
+> passive observation → context enrichment → **nudge** → tool gating → result transformation → native tools
+
+This principle resolves the central design tension. The question was: auto-load knowledge (forced injection, level 5-6) vs show an index and hope (passive, level 1). The answer is neither — it's a nudge (level 3).
+
+### How skills work (and how this differs)
+
+Claude Code skills use a two-phase system: (1) skill descriptions are always in context, (2) when the agent's response signals intent to use a skill, the **harness** intercepts and injects the full content. The agent doesn't consciously invoke a tool — the system handles content injection transparently.
+
+`kb work start` can't replicate this harness-driven injection. But it doesn't need to. The command output itself IS the nudge — it's already system-initiated (the user runs the command), and the output lands in the agent's context. The problem isn't the mechanism; it's that the current output is a bad nudge. It shows state and journal but doesn't nudge toward knowledge loading.
+
+### What makes a good nudge
+
+The current output already shows `Areas: vmctl`. That IS an index — a minimal one. And it failed. The agent saw it and didn't load knowledge. So the nudge must be qualitatively better, not just quantitatively:
+
+1. **Repo paths rendered** — answers "where is the code?" without any agent initiative
+2. **Area summaries with entry counts by type** — "6 gotchas" is a stronger signal than "35 entries" or just an area name. From the knowledge durability research: gotchas have 100% within-project retention and are the highest-value entries for preventing mistakes. Seeing "6 gotchas" should naturally trigger "I need to know what those are."
+3. **Explicit load instruction** — `Run 'kb load <id>' for full context` makes the next action obvious. The agent still decides, but the right decision is the obvious one.
+
+The agent retains agency. For trivial tasks ("fix a typo"), skipping the load is correct. For substantial work, the gotcha count signals "load me first." Today the agent doesn't even know the knowledge exists.
+
+### Rendering order
+
+Identity → Repos → State → Knowledge Area Index → Journal → Artifacts
+
+Repos early because "where is the code?" is the first question on cold start. Knowledge index before journal because ground truth (decisions, gotchas, patterns) outranks recency (last 3 sessions).
+
+### What this doesn't solve
+
+- **Agent initiative is still required** — the nudge makes the right action obvious but can't force it. Acceptable: worst case is the same as today, best case the agent loads and avoids traps.
+- **Stale knowledge** — the zone lifecycle handles this, but there's a known bug where `kb load` doesn't filter by zone (archived entries still appear). Must be fixed independently.
+- **CLAUDE.md contradictions** — if knowledge and CLAUDE.md conflict, that's a curation discipline problem, not a rendering problem.
+
+## Resolving the Unknowns
+
+### Known Unknowns — Resolved
+
+**KU1: Right level of knowledge injection**
+→ **Nudge: area index with entry counts and explicit load instruction.** Follows the "hooks as nudges" principle — system surfaces the right information, agent decides. Not auto-load (forced injection violates the nudge philosophy). Not passive index (already failed with `Areas: vmctl`). The qualitative difference is entry counts (especially gotchas) and an explicit next action.
+
+**KU2: Multi-area workspaces**
+→ **Non-issue with the index approach.** One row per area. Scales linearly. ~100 tokens for 10 areas vs ~40K tokens for full dump.
+
+**KU3: Consumer differences**
+→ **`kb work start` serves CLI agents.** Pi agents get context via extension hooks. Container agents read instruction files. Each consumer has its own injection path. The same underlying data (workspace.json, manifest.json) is available to all. Don't over-generalize the CLI command.
+
+**KU4: Rendering order**
+→ **Identity → Repos → State → Knowledge Area Index → Journal → Artifacts.** Repos early (first question on cold start). Knowledge index before journal (ground truth outranks recency).
+
+**KU5: Backward compatibility**
+→ **No breakage risk.** Output is consumed as natural language, not parsed structurally. Changes are purely additive.
+
+**KU6: Flag vs default**
+→ **Enriched output is the default.** Requiring a flag to get the nudge defeats the purpose. `--brief` for the stripped version if needed, but that's the opt-in.
+
+### Unknown Knowns — Examined
+
+**UK1: "Areas are small enough to inline"**
+→ **Moot.** Going with nudge/index approach, not inline. For the record: post-curation areas are 20-60 entries (~3-5K tokens each). Inline works for single-area but not multi-area.
+
+**UK2: "The agent will know to run kb load"**
+→ **This was the critical false assumption.** Evidence: the agent saw `Areas: vmctl` in the output and didn't load. Skills work because the harness handles injection — agents don't "know" to load skills. We can't replicate harness-driven injection, but we can make the nudge strong enough that loading becomes the obvious next action. Entry counts + explicit instruction is the mitigation. Risk remains but is acceptable.
+
+**UK3: "Workspace = one project = one area"**
+→ **True today, index handles many-to-many naturally.** No special handling needed.
+
+**UK4: "Journal entries provide enough context"**
+→ **Confirmed false.** Journal = recency (what happened last). Knowledge = ground truth (what you need to know). Different purposes, both needed. The cold start currently only has journal.
+
+**UK5: "CLAUDE.md handles the rest"**
+→ **Different concerns.** CLAUDE.md = static per-repo instructions (how to work). Knowledge areas = dynamic accumulated context (what to know). Neither substitutes for the other.
+
+### Unknown Unknowns — Investigated
+
+**UU1: Other agent consumption patterns**
+→ **Not relevant for this fix.** CLI-focused. Other consumers have their own injection paths.
+
+**UU2: Knowledge vs CLAUDE.md contradictions**
+→ **Real risk, orthogonal to cold start.** Curation discipline problem, not rendering.
+
+**UU3: Stale knowledge causing worse outcomes**
+→ **Mitigated by zones.** Known bug: `kb load` doesn't filter by zone. Fix independently.
+
+**UU4: Index nudge backfiring**
+→ **Acceptable risk.** Gotcha counts mitigate. Worst case = same as today. Agent retains judgment for trivial tasks where skipping is correct.
+
+**UU5: Token cost**
+→ **Non-issue.** Index: ~50 tokens/area. Full load: ~3-5K tokens/area. 100x cheaper.
+
+**UU6: Wasteful workspace types**
+→ **Non-issue.** Workspace existence implies context is worth surfacing.
