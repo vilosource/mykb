@@ -351,6 +351,39 @@ describe('renderWorkspace', () => {
     expect(output).not.toContain('## Knowledge Areas');
   });
 
+  it('knowledge area index is LLM-scannable (behavioral)', () => {
+    const ws = makeWorkspace({ areas: ['vmctl', 'infra-net'] });
+    const areaContexts: AreaContext[] = [
+      {
+        id: 'vmctl',
+        summary: 'Azure VM power management dashboard',
+        stats: { facts: 16, decisions: 14, gotchas: 6, patterns: 2, links: 1 },
+      },
+      {
+        id: 'infra-net',
+        summary: 'Azure networking and WireGuard VPN',
+        stats: { facts: 8, decisions: 3, gotchas: 2, patterns: 0, links: 0 },
+      },
+    ];
+    const output = renderWorkspace(ws, [], areaContexts);
+
+    // Area IDs are extractable (bold markdown)
+    const areaIdMatches = output.match(/\*\*(\w[\w-]*)\*\*/g);
+    expect(areaIdMatches).toBeTruthy();
+    expect(areaIdMatches!.length).toBe(2);
+
+    // Summaries are readable alongside IDs
+    expect(output).toContain('**vmctl**: Azure VM power management dashboard');
+    expect(output).toContain('**infra-net**: Azure networking and WireGuard VPN');
+
+    // Gotcha counts are visible (key nudge signal)
+    expect(output).toContain('6 gotchas');
+    expect(output).toContain('2 gotchas');
+
+    // Load instruction is present and actionable
+    expect(output).toMatch(/kb load/);
+  });
+
   it('renders sections in correct order: repos → state → areas → artifacts → journal', () => {
     const ws = makeWorkspace({
       links: { repos: ['/path/to/repo'], jira: 'PROJ-1' },
