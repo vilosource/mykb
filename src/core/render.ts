@@ -1,4 +1,4 @@
-import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry } from './types.js';
+import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext } from './types.js';
 import { ProvenanceStatus } from './types.js';
 
 function capitalizeZone(zone: string): string {
@@ -76,7 +76,11 @@ export function renderJson(entries: KnowledgeEntry[]): string {
   return JSON.stringify(entries, null, 2);
 }
 
-export function renderWorkspace(workspace: Workspace, journalEntries: JournalEntry[]): string {
+export function renderWorkspace(
+  workspace: Workspace,
+  journalEntries: JournalEntry[],
+  areaContexts?: AreaContext[],
+): string {
   const lines: string[] = [];
 
   lines.push(`# ${workspace.name} (${workspace.id})`);
@@ -96,8 +100,17 @@ export function renderWorkspace(workspace: Workspace, journalEntries: JournalEnt
     lines.push(stateFields.join(' | '));
   }
 
-  // Areas
-  if (workspace.areas.length > 0) {
+  // Knowledge area index (with context) or fallback to simple area list
+  if (areaContexts && areaContexts.length > 0) {
+    lines.push('');
+    lines.push('## Knowledge Areas');
+    for (const ctx of areaContexts) {
+      const counts = formatStatsCounts(ctx.stats);
+      const countsSuffix = counts ? ` — ${counts}` : '';
+      lines.push(`- **${ctx.id}**: ${ctx.summary}${countsSuffix}`);
+    }
+    lines.push('Run `kb load <id>` for full context before starting work.');
+  } else if (workspace.areas.length > 0) {
     lines.push(`Areas: ${workspace.areas.join(', ')}`);
   }
 
@@ -134,4 +147,14 @@ export function renderWorkspace(workspace: Workspace, journalEntries: JournalEnt
   }
 
   return lines.join('\n') + '\n';
+}
+
+function formatStatsCounts(stats: AreaContext['stats']): string {
+  const parts: string[] = [];
+  if (stats.facts > 0) parts.push(`${stats.facts} fact${stats.facts !== 1 ? 's' : ''}`);
+  if (stats.decisions > 0) parts.push(`${stats.decisions} decision${stats.decisions !== 1 ? 's' : ''}`);
+  if (stats.gotchas > 0) parts.push(`${stats.gotchas} gotcha${stats.gotchas !== 1 ? 's' : ''}`);
+  if (stats.patterns > 0) parts.push(`${stats.patterns} pattern${stats.patterns !== 1 ? 's' : ''}`);
+  if (stats.links > 0) parts.push(`${stats.links} link${stats.links !== 1 ? 's' : ''}`);
+  return parts.join(', ');
 }
