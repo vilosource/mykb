@@ -6,7 +6,7 @@ import {
   renderJson,
   renderWorkspace,
 } from '../../src/core/render.js';
-import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry } from '../../src/core/types.js';
+import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext } from '../../src/core/types.js';
 import { Zone, ProvenanceStatus } from '../../src/core/types.js';
 
 function makeEntry(overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry {
@@ -287,5 +287,67 @@ describe('renderWorkspace', () => {
     const ws = makeWorkspace({ links: {} });
     const output = renderWorkspace(ws, []);
     expect(output).not.toContain('Repos:');
+  });
+
+  it('renders knowledge area index with summaries and counts', () => {
+    const ws = makeWorkspace({ areas: ['vmctl'] });
+    const areaContexts: AreaContext[] = [
+      {
+        id: 'vmctl',
+        summary: 'Azure VM power management dashboard',
+        stats: { facts: 16, decisions: 14, gotchas: 6, patterns: 2, links: 1 },
+      },
+    ];
+    const output = renderWorkspace(ws, [], areaContexts);
+    expect(output).toContain('## Knowledge Areas');
+    expect(output).toContain('**vmctl**');
+    expect(output).toContain('Azure VM power management dashboard');
+    expect(output).toContain('16 facts');
+    expect(output).toContain('14 decisions');
+    expect(output).toContain('6 gotchas');
+    expect(output).toContain('2 patterns');
+    expect(output).toContain('1 link');
+  });
+
+  it('renders only non-zero entry counts', () => {
+    const ws = makeWorkspace({ areas: ['empty-area'] });
+    const areaContexts: AreaContext[] = [
+      {
+        id: 'empty-area',
+        summary: 'An area with only facts',
+        stats: { facts: 5, decisions: 0, gotchas: 0, patterns: 0, links: 0 },
+      },
+    ];
+    const output = renderWorkspace(ws, [], areaContexts);
+    expect(output).toContain('5 facts');
+    expect(output).not.toContain('0 decisions');
+    expect(output).not.toContain('0 gotchas');
+  });
+
+  it('renders nudge instruction after area index', () => {
+    const ws = makeWorkspace({ areas: ['vmctl'] });
+    const areaContexts: AreaContext[] = [
+      {
+        id: 'vmctl',
+        summary: 'Test',
+        stats: { facts: 1, decisions: 0, gotchas: 0, patterns: 0, links: 0 },
+      },
+    ];
+    const output = renderWorkspace(ws, [], areaContexts);
+    expect(output).toContain('kb load');
+  });
+
+  it('falls back to Areas line when areaContexts not provided', () => {
+    const ws = makeWorkspace({ areas: ['stark', 'infra-vm'] });
+    const output = renderWorkspace(ws, []);
+    expect(output).toContain('Areas: stark, infra-vm');
+    expect(output).not.toContain('## Knowledge Areas');
+  });
+
+  it('falls back to Areas line when areaContexts is empty array', () => {
+    const ws = makeWorkspace({ areas: ['stark', 'infra-vm'] });
+    const output = renderWorkspace(ws, [], []);
+    expect(output).toContain('Areas: stark, infra-vm');
+    expect(output).not.toContain('## Knowledge Areas');
   });
 });
