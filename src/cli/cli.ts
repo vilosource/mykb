@@ -675,12 +675,19 @@ workCmd
 
 workCmd
   .command('note [text]')
-  .description('Add or list workspace notes')
+  .description('Add, list, or delete workspace notes')
   .option('--tags <tags>', 'Comma-separated tags (e.g. bug,ux)')
   .option('--tag <tag>', 'Filter notes by tag')
-  .action((text: string | undefined, opts: { tags?: string; tag?: string }) => {
+  .option('--delete <id>', 'Delete a note by ID')
+  .action((text: string | undefined, opts: { tags?: string; tag?: string; delete?: string }) => {
     const storage = createWorkspaceStorage();
     const activeId = requireActiveWorkspace(storage);
+
+    if (opts.delete) {
+      storage.deleteNote(activeId, opts.delete);
+      console.log(`Note '${opts.delete}' deleted`);
+      return;
+    }
 
     if (!text) {
       // List mode
@@ -692,7 +699,7 @@ workCmd
       for (const note of notes) {
         const dateStr = note.date.split('T')[0];
         const tagStr = note.tags.length > 0 ? ` [${note.tags.join(', ')}]` : '';
-        console.log(`- ${dateStr}${tagStr}: ${note.text}`);
+        console.log(`- ${note.id}  ${dateStr}${tagStr}: ${note.text}`);
       }
       return;
     }
@@ -719,7 +726,7 @@ workCmd
     for (const note of notes) {
       const dateStr = note.date.split('T')[0];
       const tagStr = note.tags.length > 0 ? ` [${note.tags.join(', ')}]` : '';
-      console.log(`- ${dateStr}${tagStr}: ${note.text}`);
+      console.log(`- ${note.id}  ${dateStr}${tagStr}: ${note.text}`);
     }
   });
 

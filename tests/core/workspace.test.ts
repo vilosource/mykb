@@ -394,6 +394,31 @@ describe('FileSystemWorkspaceStorage Notes', () => {
       expect(bugs).toEqual([]);
     });
   });
+
+  it('deleteNote removes note via tombstone', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      const id1 = storage.appendNote('my-proj', 'Keep this', ['idea']);
+      const id2 = storage.appendNote('my-proj', 'Delete this', ['bug']);
+
+      storage.deleteNote('my-proj', id2);
+
+      const notes = storage.readNotes('my-proj');
+      expect(notes).toHaveLength(1);
+      expect(notes[0].text).toBe('Keep this');
+    });
+  });
+
+  it('deleteNote throws for non-existent note', async () => {
+    await withTempBrain(async (brainPath) => {
+      const storage = new FileSystemWorkspaceStorage(brainPath);
+      storage.createWorkspace('my-proj', 'My Project');
+
+      expect(() => storage.deleteNote('my-proj', 'nonexistent')).toThrow('Note not found');
+    });
+  });
 });
 
 describe('FileSystemWorkspaceStorage Backward Compat (documents → artifacts)', () => {

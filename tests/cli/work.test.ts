@@ -210,6 +210,28 @@ describe('kb work CLI', () => {
       expect(stdout).not.toContain('an idea');
     });
 
+    it('lists notes with IDs', () => {
+      const { stdout: addOut } = runKb('work note "a note" --tags bug');
+      const match = addOut.match(/\((\w+)\)/);
+      expect(match).toBeTruthy();
+      const { stdout } = runKb('work notes');
+      expect(stdout).toContain(match![1]);
+    });
+
+    it('deletes a note by ID', () => {
+      const { stdout: addOut } = runKb('work note "delete me" --tags bug');
+      const noteId = addOut.match(/\((\w+)\)/)![1];
+      runKb('work note "keep me" --tags idea');
+
+      const { stdout, exitCode } = runKb(`work note --delete ${noteId}`);
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('deleted');
+
+      const { stdout: listOut } = runKb('work notes');
+      expect(listOut).not.toContain('delete me');
+      expect(listOut).toContain('keep me');
+    });
+
     it('shows empty message when no notes', () => {
       const { stdout, exitCode } = runKb('work notes');
       expect(exitCode).toBe(0);

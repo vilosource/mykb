@@ -272,6 +272,7 @@ export interface WorkspaceStorage {
   readJournal(id: string, limit?: number): JournalEntry[];
   appendNote(id: string, text: string, tags?: string[]): string;
   readNotes(id: string, tag?: string): NoteEntry[];
+  deleteNote(id: string, noteId: string): void;
   // Artifact CRUD
   addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string;
   readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null;

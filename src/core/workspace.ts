@@ -250,13 +250,38 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     const content = fs.readFileSync(file, 'utf-8').trim();
     if (!content) return [];
 
-    const entries = content.split('\n').map((line) => JSON.parse(line) as NoteEntry);
+    // Resolve tombstones: last entry per ID wins
+    const byId = new Map<string, NoteEntry | null>();
+    for (const line of content.split('\n')) {
+      const parsed = JSON.parse(line) as NoteEntry & { deleted?: true };
+      if (parsed.deleted) {
+        byId.set(parsed.id, null);
+      } else {
+        byId.set(parsed.id, parsed);
+      }
+    }
+
+    const entries: NoteEntry[] = [];
+    for (const entry of byId.values()) {
+      if (entry !== null) entries.push(entry);
+    }
 
     if (tag) {
       return entries.filter((e) => e.tags.includes(tag));
     }
 
     return entries;
+  }
+
+  deleteNote(id: string, noteId: string): void {
+    this.requireWorkspace(id);
+    const notes = this.readNotes(id);
+    const note = notes.find((n) => n.id === noteId);
+    if (!note) {
+      throw new EntryValidationError(`Note not found: ${noteId}`);
+    }
+    const tombstone = { id: noteId, deleted: true, updated: new Date().toISOString() };
+    fs.appendFileSync(this.notesFile(id), JSON.stringify(tombstone) + '\n');
   }
 
   // --- Artifact methods ---
