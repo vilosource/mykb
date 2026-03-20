@@ -97,6 +97,20 @@ export type ManifestFile = {
   areas: ManifestArea[];
 };
 
+// --- Area context for workspace rendering ---
+
+export type AreaContext = {
+  id: string;
+  summary: string;
+  stats: {
+    facts: number;
+    decisions: number;
+    gotchas: number;
+    patterns: number;
+    links: number;
+  };
+};
+
 // --- Filter types ---
 
 export type EntryFilter = {
