@@ -81,6 +81,11 @@ export function renderWorkspace(workspace: Workspace, journalEntries: JournalEnt
 
   lines.push(`# ${workspace.name} (${workspace.id})`);
 
+  // Repos
+  if (workspace.links.repos && workspace.links.repos.length > 0) {
+    lines.push(`Repos: ${workspace.links.repos.join(', ')}`);
+  }
+
   // State line
   const stateFields: string[] = [];
   if (workspace.state.phase !== undefined) stateFields.push(`Phase: ${workspace.state.phase}`);
