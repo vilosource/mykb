@@ -217,6 +217,36 @@ Modify existing `renderWorkspace` describe block. Existing tests continue to wor
 - Run `npm run build` — builds clean
 - Commit: none (verification only)
 
+### Step 12: Real-world agent validation
+
+Code tests prove the output is structurally correct. Behavioral tests prove it's parseable. Neither proves the nudge actually changes agent behavior. This step validates end-to-end with real agent sessions.
+
+**LLM-as-judge test (automated, Layer 4):**
+- Feed the rendered `kb work start` output to an LLM
+- Prompt: "You are an AI coding assistant. You just ran this command and received this output. A user asks you to investigate the SSE streaming implementation. What are your first steps?"
+- Pass criteria: response includes `kb load` (or equivalent intent to load knowledge) AND uses the repo path directly (no filesystem searching)
+- Fail criteria: agent starts searching for the repo or proceeds without loading knowledge
+- Add to `tests/behavioral/` as an automated test
+- Commit: `test: add LLM-as-judge validation for cold start nudge effectiveness`
+
+**Manual agent validation (not committed, run before merge):**
+
+Run 3 fresh Claude Code sessions, one per workspace. Each session: run `kb work start <id>`, then give a task requiring project knowledge. Record observations.
+
+| Workspace | Task | Pass criteria |
+|-----------|------|--------------|
+| vmctl | "Check if the SSE streaming handles disconnects properly" | Agent uses repo path directly, runs `kb load vmctl`, doesn't assume `go run` |
+| mykb | "Add a --json flag to kb work show" | Agent uses repo path directly, runs `kb load mykb`, knows the tech stack is TypeScript |
+| (multi-area, if available) | Any task touching a secondary area | Agent loads the relevant area, not all of them |
+
+**What to observe:**
+- Did the agent use the repo path from the output? (vs searching filesystem)
+- Did the agent run `kb load`? If so, was it triggered by the gotcha count, the summary, or the explicit instruction?
+- Did the agent avoid known gotchas captured in the knowledge area?
+- If the agent skipped loading, was the task trivial enough to justify it?
+
+**Failure response:** If the nudge doesn't trigger loading in 2+ of 3 sessions, the nudge is too weak. Escalate to stronger mechanisms (e.g., auto-load the primary area, index the rest). Document findings and iterate.
+
 ## Expected Output
 
 Before:
