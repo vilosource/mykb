@@ -75,6 +75,37 @@ describe('kb work CLI', () => {
       expect(stdout).toContain('Test Workspace');
       expect(stdout).toContain('test-ws');
     });
+
+    it('shows repo paths in output', () => {
+      runKb('work create test-ws "Test" --repos /path/to/repo');
+      const { stdout, exitCode } = runKb('work start test-ws');
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('Repos: /path/to/repo');
+    });
+
+    it('shows knowledge area index with entry counts', () => {
+      // Create an area with entries
+      runKb('init area test-area "Test Area" "A test knowledge area"');
+      runKb('add fact test-area "A test fact"');
+      runKb('add gotcha test-area "A test gotcha"');
+      // Create workspace linked to that area
+      runKb('work create test-ws "Test" --areas test-area');
+      const { stdout, exitCode } = runKb('work start test-ws');
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('## Knowledge Areas');
+      expect(stdout).toContain('test-area');
+      expect(stdout).toContain('A test knowledge area');
+      expect(stdout).toContain('1 fact');
+      expect(stdout).toContain('1 gotcha');
+    });
+
+    it('shows nudge instruction', () => {
+      runKb('init area test-area "Test Area" "Summary"');
+      runKb('add fact test-area "A fact"');
+      runKb('work create test-ws "Test" --areas test-area');
+      const { stdout } = runKb('work start test-ws');
+      expect(stdout).toContain('kb load');
+    });
   });
 
   describe('state', () => {
