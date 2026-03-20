@@ -350,4 +350,32 @@ describe('renderWorkspace', () => {
     expect(output).toContain('Areas: stark, infra-vm');
     expect(output).not.toContain('## Knowledge Areas');
   });
+
+  it('renders sections in correct order: repos → state → areas → artifacts → journal', () => {
+    const ws = makeWorkspace({
+      links: { repos: ['/path/to/repo'], jira: 'PROJ-1' },
+    });
+    const areaContexts: AreaContext[] = [
+      {
+        id: 'stark',
+        summary: 'Test area',
+        stats: { facts: 1, decisions: 0, gotchas: 0, patterns: 0, links: 0 },
+      },
+    ];
+    const journal: JournalEntry[] = [
+      { date: '2026-03-15T00:00:00.000Z', text: 'Did something' },
+    ];
+    const output = renderWorkspace(ws, journal, areaContexts);
+
+    const reposPos = output.indexOf('Repos:');
+    const statePos = output.indexOf('Phase:');
+    const areasPos = output.indexOf('## Knowledge Areas');
+    const artifactsPos = output.indexOf('Artifacts:');
+    const journalPos = output.indexOf('## Recent Journal');
+
+    expect(reposPos).toBeLessThan(statePos);
+    expect(statePos).toBeLessThan(areasPos);
+    expect(areasPos).toBeLessThan(artifactsPos);
+    expect(artifactsPos).toBeLessThan(journalPos);
+  });
 });
