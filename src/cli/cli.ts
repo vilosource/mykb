@@ -9,7 +9,7 @@ import { readVersion } from './version.js';
 import { initBrain } from '../core/init.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
 import { MykbStore } from '../core/knowledge-store.js';
-import { createArea, listAreas, updateAreaMetadata, deleteArea } from '../core/area.js';
+import { createArea, listAreas, readAreaMetadata, updateAreaMetadata, deleteArea } from '../core/area.js';
 import { renderMarkdown, renderJson, renderAreaIndex, renderWorkspace } from '../core/render.js';
 import { FileSystemWorkspaceStorage } from '../core/workspace.js';
 import type { WorkspaceState } from '../core/types.js';
@@ -19,6 +19,7 @@ import { createDatabase } from '../core/db.js';
 import { getAreaStats } from '../core/db.js';
 import { Zone, ProvenanceStatus } from '../core/types.js';
 import type {
+  AreaContext,
   EntryFilter,
   AddFactOptions,
   AddDecisionOptions,
@@ -533,6 +534,26 @@ function countTypes(entries: { type: string }[]): string {
     .join(', ');
 }
 
+function fetchAreaContexts(areaIds: string[]): AreaContext[] {
+  if (areaIds.length === 0) return [];
+  const bp = requireBrain();
+  const dbPath = path.join(bp, 'kb.db');
+  const db = createDatabase(dbPath);
+  try {
+    const contexts: AreaContext[] = [];
+    for (const areaId of areaIds) {
+      const metadata = readAreaMetadata(bp, areaId);
+      if (metadata) {
+        const stats = getAreaStats(db, areaId);
+        contexts.push({ id: areaId, summary: metadata.summary, stats });
+      }
+    }
+    return contexts;
+  } finally {
+    db.close();
+  }
+}
+
 // --- work (workspace management) ---
 const workCmd = program.command('work').description('Workspace management');
 
@@ -588,7 +609,8 @@ workCmd
     // Re-read workspace to get updated artifacts
     const updated = storage.readWorkspace(id)!;
     const journal = storage.readJournal(id, 3);
-    process.stdout.write(renderWorkspace(updated, journal));
+    const areaContexts = fetchAreaContexts(updated.areas);
+    process.stdout.write(renderWorkspace(updated, journal, areaContexts));
   });
 
 workCmd
@@ -704,7 +726,8 @@ workCmd
       process.exit(1);
     }
     const journal = storage.readJournal(wsId, 5);
-    process.stdout.write(renderWorkspace(ws, journal));
+    const areaContexts = fetchAreaContexts(ws.areas);
+    process.stdout.write(renderWorkspace(ws, journal, areaContexts));
   });
 
 workCmd
