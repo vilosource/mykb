@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,19 +13,19 @@ beforeAll(() => {
   execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'pipe' });
 });
 
-function runKb(args: string): { stdout: string; exitCode: number } {
-  try {
-    const stdout = execSync(`node ${CLI_PATH} ${args}`, {
-      cwd: PROJECT_ROOT,
-      env: { ...process.env, MYKB_DIR: brainPath },
-      encoding: 'utf-8',
-      timeout: 10000,
-    });
-    return { stdout, exitCode: 0 };
-  } catch (e: unknown) {
-    const err = e as { stdout?: string; stderr?: string; status?: number };
-    return { stdout: (err.stdout || err.stderr || '').toString(), exitCode: err.status || 1 };
-  }
+function runKb(args: string): { stdout: string; stderr: string; exitCode: number } {
+  const result = spawnSync(`node ${CLI_PATH} ${args}`, {
+    cwd: PROJECT_ROOT,
+    env: { ...process.env, MYKB_DIR: brainPath },
+    encoding: 'utf-8',
+    timeout: 10000,
+    shell: true,
+  });
+  return {
+    stdout: (result.stdout || '').toString(),
+    stderr: (result.stderr || '').toString(),
+    exitCode: result.status ?? 1,
+  };
 }
 
 beforeEach(() => {
@@ -121,9 +121,9 @@ describe('kb work CLI', () => {
     });
 
     it('errors without active workspace', () => {
-      const { stdout, exitCode } = runKb('work state --phase "building"');
+      const { stderr, exitCode } = runKb('work state --phase "building"');
       expect(exitCode).toBe(1);
-      expect(stdout.toLowerCase()).toContain('no active workspace');
+      expect(stderr.toLowerCase()).toContain('no active workspace');
     });
 
     it('updates multiple state fields', () => {
@@ -165,9 +165,9 @@ describe('kb work CLI', () => {
 
     it('errors without active workspace', () => {
       runKb('work stop');
-      const { stdout, exitCode } = runKb('work journal "some text"');
+      const { stderr, exitCode } = runKb('work journal "some text"');
       expect(exitCode).toBe(1);
-      expect(stdout.toLowerCase()).toContain('no active workspace');
+      expect(stderr.toLowerCase()).toContain('no active workspace');
     });
   });
 
@@ -240,9 +240,9 @@ describe('kb work CLI', () => {
 
     it('errors without active workspace', () => {
       runKb('work stop');
-      const { stdout, exitCode } = runKb('work note "some text"');
+      const { stderr, exitCode } = runKb('work note "some text"');
       expect(exitCode).toBe(1);
-      expect(stdout.toLowerCase()).toContain('no active workspace');
+      expect(stderr.toLowerCase()).toContain('no active workspace');
     });
   });
 
@@ -304,9 +304,9 @@ describe('kb work CLI', () => {
     });
 
     it('errors when no active workspace and no id given', () => {
-      const { stdout, exitCode } = runKb('work show');
+      const { stderr, exitCode } = runKb('work show');
       expect(exitCode).toBe(1);
-      expect(stdout.toLowerCase()).toContain('no active workspace');
+      expect(stderr.toLowerCase()).toContain('no active workspace');
     });
   });
 
@@ -320,6 +320,33 @@ describe('kb work CLI', () => {
       // Verify no active workspace
       const show = runKb('work show');
       expect(show.exitCode).toBe(1);
+    });
+
+    it('warns when no handoff exists on stop', () => {
+      runKb('work create test-ws "Test Workspace"');
+      runKb('work start test-ws');
+      const { stderr, exitCode } = runKb('work stop');
+      expect(exitCode).toBe(0);
+      expect(stderr.toLowerCase()).toContain('no handoff');
+    });
+
+    it('does not warn when handoff exists and is fresh', () => {
+      runKb('work create test-ws "Test Workspace"');
+      runKb('work start test-ws');
+      runKb('work handoff "Session context captured"');
+      const { stderr } = runKb('work stop');
+      expect(stderr).not.toContain('handoff');
+    });
+
+    it('warns when handoff is stale (journal newer)', () => {
+      runKb('work create test-ws "Test Workspace"');
+      runKb('work start test-ws');
+      runKb('work handoff "Old context"');
+      // Add journal entry after handoff to make it stale
+      runKb('work journal "New work happened"');
+      const { stderr, exitCode } = runKb('work stop');
+      expect(exitCode).toBe(0);
+      expect(stderr.toLowerCase()).toContain('outdated');
     });
   });
 
@@ -404,9 +431,9 @@ describe('kb work CLI', () => {
 
     it('errors without active workspace', () => {
       runKb('work stop');
-      const { stdout, exitCode } = runKb('work handoff "some text"');
+      const { stderr, exitCode } = runKb('work handoff "some text"');
       expect(exitCode).toBe(1);
-      expect(stdout.toLowerCase()).toContain('no active workspace');
+      expect(stderr.toLowerCase()).toContain('no active workspace');
     });
   });
 });

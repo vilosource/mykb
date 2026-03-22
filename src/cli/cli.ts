@@ -619,6 +619,20 @@ workCmd
   .description('Clear active workspace')
   .action(() => {
     const storage = createWorkspaceStorage();
+    const activeId = storage.getActiveWorkspaceId();
+    if (activeId) {
+      const handoff = storage.readHandoff(activeId);
+      if (!handoff) {
+        process.stderr.write('Warning: no handoff written. Use `kb work handoff` to capture session context.\n');
+      } else {
+        // Check if handoff is stale (journal entries newer than handoff)
+        const journal = storage.readJournal(activeId);
+        const newestJournal = journal.length > 0 ? journal[journal.length - 1].date : null;
+        if (newestJournal && handoff.updated && newestJournal > handoff.updated) {
+          process.stderr.write('Warning: handoff may be outdated. Use `kb work handoff` to update.\n');
+        }
+      }
+    }
     storage.clearActiveWorkspaceId();
     console.log('Workspace stopped');
   });
