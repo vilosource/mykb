@@ -251,6 +251,11 @@ export type NoteEntry = {
   tags: string[];
 };
 
+export type HandoffData = {
+  text: string;
+  updated: string;
+};
+
 export type CreateWorkspaceOptions = {
   areas?: string[];
   links?: WorkspaceLinks;
@@ -273,6 +278,10 @@ export interface WorkspaceStorage {
   appendNote(id: string, text: string, tags?: string[]): string;
   readNotes(id: string, tag?: string): NoteEntry[];
   deleteNote(id: string, noteId: string): void;
+  // Handoff
+  writeHandoff(id: string, text: string): void;
+  readHandoff(id: string): HandoffData | null;
+  clearHandoff(id: string): void;
   // Artifact CRUD
   addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string;
   readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null;

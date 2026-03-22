@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withTempBrain } from '../helpers.js';
 import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
-import type { Workspace, WorkspaceState, ArtifactEntry } from '../../src/core/types.js';
+import type { Workspace, WorkspaceState, ArtifactEntry, HandoffData } from '../../src/core/types.js';
 import { EntryValidationError, ArtifactNotFoundError } from '../../src/core/errors.js';
 
 describe('FileSystemWorkspaceStorage CRUD', () => {
@@ -1059,6 +1059,117 @@ describe('FileSystemWorkspaceStorage Session Isolation (KB_SESSION_ID)', () => {
       storage.clearActiveWorkspaceId();
 
       expect(fs.existsSync(path.join(brainPath, 'workspaces', '.active'))).toBe(false);
+    });
+  });
+
+  describe('handoff — writeHandoff / readHandoff / clearHandoff', () => {
+    it('writeHandoff creates continuity.md with YAML frontmatter', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+        storage.writeHandoff('proj', 'Working on step 3. Next: write tests.');
+
+        const file = path.join(brainPath, 'workspaces', 'proj', 'continuity.md');
+        expect(fs.existsSync(file)).toBe(true);
+
+        const content = fs.readFileSync(file, 'utf-8');
+        expect(content).toContain('---\nupdated:');
+        expect(content).toContain('Working on step 3. Next: write tests.');
+      });
+    });
+
+    it('readHandoff returns text and updated timestamp', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+        storage.writeHandoff('proj', 'Implementing Phase 2.');
+
+        const handoff = storage.readHandoff('proj');
+        expect(handoff).not.toBeNull();
+        expect(handoff!.text).toBe('Implementing Phase 2.');
+        expect(handoff!.updated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      });
+    });
+
+    it('readHandoff returns null when no continuity.md exists', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+
+        const handoff = storage.readHandoff('proj');
+        expect(handoff).toBeNull();
+      });
+    });
+
+    it('writeHandoff overwrites previous content', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+        storage.writeHandoff('proj', 'First handoff.');
+        storage.writeHandoff('proj', 'Second handoff.');
+
+        const handoff = storage.readHandoff('proj');
+        expect(handoff!.text).toBe('Second handoff.');
+      });
+    });
+
+    it('clearHandoff removes continuity.md', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+        storage.writeHandoff('proj', 'Some context.');
+        storage.clearHandoff('proj');
+
+        const handoff = storage.readHandoff('proj');
+        expect(handoff).toBeNull();
+
+        const file = path.join(brainPath, 'workspaces', 'proj', 'continuity.md');
+        expect(fs.existsSync(file)).toBe(false);
+      });
+    });
+
+    it('clearHandoff is idempotent when no file exists', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+        // Should not throw
+        storage.clearHandoff('proj');
+      });
+    });
+
+    it('writeHandoff throws for non-existent workspace', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        expect(() => storage.writeHandoff('ghost', 'text')).toThrow();
+      });
+    });
+
+    it('writeHandoff preserves multi-line content', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+        const multiLine = 'Line 1: doing X.\nLine 2: next Y.\nLine 3: blocked on Z.';
+        storage.writeHandoff('proj', multiLine);
+
+        const handoff = storage.readHandoff('proj');
+        expect(handoff!.text).toBe(multiLine);
+      });
+    });
+
+    it('writeHandoff updates timestamp on each write', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('proj', 'Project');
+        storage.writeHandoff('proj', 'First.');
+        const first = storage.readHandoff('proj')!.updated;
+
+        // Small delay to ensure different timestamp
+        await new Promise((r) => setTimeout(r, 10));
+        storage.writeHandoff('proj', 'Second.');
+        const second = storage.readHandoff('proj')!.updated;
+
+        expect(second).not.toBe(first);
+      });
     });
   });
 });
