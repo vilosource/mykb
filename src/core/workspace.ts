@@ -10,6 +10,8 @@ import type {
   JournalEntry,
   NoteEntry,
   HandoffData,
+  CheckpointInput,
+  CheckpointResult,
   AddArtifactOptions,
   ArtifactEntry,
   ArtifactSyncResult,
@@ -550,5 +552,68 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     }
 
     return { tracked, untracked, missing };
+  }
+
+  checkpoint(id: string, input: CheckpointInput, addKnowledge?: (type: string, area: string, text: string, options: Record<string, unknown>) => string): CheckpointResult {
+    const ws = this.readWorkspace(id);
+    if (!ws) {
+      throw new Error(`Workspace '${id}' not found`);
+    }
+
+    const result: CheckpointResult = {
+      journal: false,
+      handoff: false,
+      state: [],
+      knowledge: { added: 0, errors: [] },
+    };
+
+    // State first (so journal/handoff timestamps reflect post-state)
+    if (input.state) {
+      const fields: string[] = [];
+      if (input.state.phase !== undefined) fields.push('phase');
+      if (input.state.active !== undefined) fields.push('active');
+      if (input.state.blocked !== undefined) fields.push('blocked');
+      if (input.state.next !== undefined) fields.push('next');
+      if (fields.length > 0) {
+        this.updateWorkspaceState(id, input.state);
+        result.state = fields;
+      }
+    }
+
+    // Journal
+    if (input.journal) {
+      this.appendJournal(id, input.journal);
+      result.journal = true;
+    }
+
+    // Knowledge entries
+    if (input.knowledge && input.knowledge.length > 0 && addKnowledge) {
+      for (const entry of input.knowledge) {
+        try {
+          const opts: Record<string, unknown> = {};
+          if (entry.tags) opts.tags = entry.tags;
+          if (entry.type === 'decision') {
+            if (entry.why) opts.why = entry.why;
+            if (entry.rejected) opts.rejected = entry.rejected;
+            if (entry.context) opts.context = entry.context;
+          }
+          if (entry.type === 'gotcha') {
+            if (entry.failed !== undefined) opts.failed = entry.failed;
+          }
+          addKnowledge(entry.type, entry.area, entry.text, opts);
+          result.knowledge.added++;
+        } catch (err) {
+          result.knowledge.errors.push(`${entry.type}/${entry.area}: ${(err as Error).message}`);
+        }
+      }
+    }
+
+    // Handoff last (timestamp reflects completed checkpoint)
+    if (input.handoff) {
+      this.writeHandoff(id, input.handoff);
+      result.handoff = true;
+    }
+
+    return result;
   }
 }

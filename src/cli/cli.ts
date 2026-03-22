@@ -666,6 +666,88 @@ workCmd
   });
 
 workCmd
+  .command('checkpoint')
+  .description('Batch update workspace: journal, handoff, state, and knowledge entries from structured JSON via stdin')
+  .action(() => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+
+    const raw = fs.readFileSync(0, 'utf-8').trim();
+    if (!raw) {
+      process.stderr.write('Error: no JSON input provided on stdin.\n');
+      process.exit(1);
+    }
+
+    let input;
+    try {
+      input = JSON.parse(raw);
+    } catch {
+      process.stderr.write('Error: invalid JSON input.\n');
+      process.exit(1);
+    }
+
+    // Validate top-level fields
+    const validKeys = new Set(['journal', 'handoff', 'state', 'knowledge']);
+    for (const key of Object.keys(input)) {
+      if (!validKeys.has(key)) {
+        process.stderr.write(`Error: unknown field '${key}'. Valid fields: journal, handoff, state, knowledge.\n`);
+        process.exit(1);
+      }
+    }
+
+    if (input.journal !== undefined && typeof input.journal !== 'string') {
+      process.stderr.write('Error: journal must be a string.\n');
+      process.exit(1);
+    }
+    if (input.handoff !== undefined && typeof input.handoff !== 'string') {
+      process.stderr.write('Error: handoff must be a string.\n');
+      process.exit(1);
+    }
+    if (input.state !== undefined && (typeof input.state !== 'object' || Array.isArray(input.state))) {
+      process.stderr.write('Error: state must be an object.\n');
+      process.exit(1);
+    }
+    if (input.knowledge !== undefined && !Array.isArray(input.knowledge)) {
+      process.stderr.write('Error: knowledge must be an array.\n');
+      process.exit(1);
+    }
+
+    // Build addKnowledge callback using the store
+    const bp = requireBrain();
+    const store = MykbStore.open(bp);
+    const addKnowledge = (type: string, area: string, text: string, opts: Record<string, unknown>): string => {
+      switch (type) {
+        case 'fact': return store.addFact(area, text, opts);
+        case 'decision': return store.addDecision(area, text, opts);
+        case 'gotcha': return store.addGotcha(area, text, opts);
+        case 'pattern': return store.addPattern(area, text, opts);
+        default: throw new Error(`Unknown knowledge type: ${type}`);
+      }
+    };
+
+    const result = storage.checkpoint(activeId, input, addKnowledge);
+    store.close();
+
+    // Report
+    const parts: string[] = [];
+    if (result.journal) parts.push('journal');
+    if (result.state.length > 0) parts.push(`state (${result.state.join(', ')})`);
+    if (result.knowledge.added > 0) parts.push(`${result.knowledge.added} knowledge entries`);
+    if (result.knowledge.errors.length > 0) {
+      for (const err of result.knowledge.errors) {
+        process.stderr.write(`Warning: ${err}\n`);
+      }
+    }
+    if (result.handoff) parts.push('handoff');
+
+    if (parts.length === 0) {
+      console.log('checkpoint: nothing to update (all fields empty)');
+    } else {
+      console.log(`checkpoint: ${parts.join(' + ')}`);
+    }
+  });
+
+workCmd
   .command('state')
   .description('Update active workspace state')
   .option('--phase <phase>', 'Current phase')

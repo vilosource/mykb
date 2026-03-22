@@ -13,13 +13,14 @@ beforeAll(() => {
   execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'pipe' });
 });
 
-function runKb(args: string): { stdout: string; stderr: string; exitCode: number } {
+function runKb(args: string, opts?: { stdin?: string }): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync(`node ${CLI_PATH} ${args}`, {
     cwd: PROJECT_ROOT,
     env: { ...process.env, MYKB_DIR: brainPath },
     encoding: 'utf-8',
     timeout: 10000,
     shell: true,
+    input: opts?.stdin,
   });
   return {
     stdout: (result.stdout || '').toString(),
@@ -434,6 +435,133 @@ describe('kb work CLI', () => {
       const { stderr, exitCode } = runKb('work handoff "some text"');
       expect(exitCode).toBe(1);
       expect(stderr.toLowerCase()).toContain('no active workspace');
+    });
+  });
+
+  describe('checkpoint', () => {
+    beforeEach(() => {
+      runKb('work create test-ws "Test Workspace"');
+      runKb('work start test-ws');
+      // Create an area for knowledge entry tests
+      runKb('area create test-area "Test Area"');
+    });
+
+    it('updates journal only', () => {
+      const { stdout, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({ journal: 'Milestone reached' }),
+      });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('journal');
+
+      const journal = runKb('work journal --show 1');
+      expect(journal.stdout).toContain('Milestone reached');
+    });
+
+    it('updates handoff only', () => {
+      const { stdout, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({ handoff: 'Next: write tests' }),
+      });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('handoff');
+
+      const show = runKb('work start test-ws');
+      expect(show.stdout).toContain('Next: write tests');
+    });
+
+    it('updates state only', () => {
+      const { stdout, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({ state: { phase: 'testing', active: 'unit tests' } }),
+      });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('state (phase, active)');
+
+      const show = runKb('work show test-ws');
+      expect(show.stdout).toContain('testing');
+      expect(show.stdout).toContain('unit tests');
+    });
+
+    it('adds knowledge entries', () => {
+      const { stdout, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({
+          knowledge: [
+            { type: 'fact', area: 'test-area', text: 'Checkpoint works' },
+            { type: 'decision', area: 'test-area', text: 'Use JSON stdin', why: 'Harness agnostic' },
+          ],
+        }),
+      });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('2 knowledge entries');
+
+      const loaded = runKb('load test-area');
+      expect(loaded.stdout).toContain('Checkpoint works');
+      expect(loaded.stdout).toContain('Use JSON stdin');
+    });
+
+    it('updates all fields at once', () => {
+      const { stdout, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({
+          journal: 'Full checkpoint test',
+          handoff: 'Session continuity text',
+          state: { phase: 'done', next: 'ship it' },
+          knowledge: [
+            { type: 'fact', area: 'test-area', text: 'All fields work' },
+          ],
+        }),
+      });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('journal');
+      expect(stdout).toContain('state (phase, next)');
+      expect(stdout).toContain('1 knowledge entries');
+      expect(stdout).toContain('handoff');
+    });
+
+    it('reports nothing to update for empty object', () => {
+      const { stdout, exitCode } = runKb('work checkpoint', { stdin: '{}' });
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('nothing to update');
+    });
+
+    it('errors on invalid JSON', () => {
+      const { stderr, exitCode } = runKb('work checkpoint', { stdin: 'not json' });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('invalid JSON');
+    });
+
+    it('errors on unknown fields', () => {
+      const { stderr, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({ journal: 'ok', bogus: 'bad' }),
+      });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('unknown field');
+    });
+
+    it('errors on empty stdin', () => {
+      const { stderr, exitCode } = runKb('work checkpoint', { stdin: '' });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('no JSON input');
+    });
+
+    it('errors without active workspace', () => {
+      runKb('work stop');
+      const { stderr, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({ journal: 'test' }),
+      });
+      expect(exitCode).toBe(1);
+      expect(stderr.toLowerCase()).toContain('no active workspace');
+    });
+
+    it('reports knowledge errors without failing', () => {
+      const { stdout, exitCode } = runKb('work checkpoint', {
+        stdin: JSON.stringify({
+          journal: 'Still works',
+          knowledge: [
+            { type: 'fact', area: 'nonexistent-area', text: 'Should fail' },
+          ],
+        }),
+      });
+      // Command should still succeed (journal written) but report knowledge errors
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('journal');
     });
   });
 });

@@ -256,6 +256,36 @@ export type HandoffData = {
   updated: string;
 };
 
+// --- Checkpoint types ---
+
+export type CheckpointKnowledgeEntry = {
+  type: 'fact' | 'decision' | 'gotcha' | 'pattern';
+  area: string;
+  text: string;
+  tags?: string[];
+  // decision-specific
+  why?: string;
+  rejected?: string;
+  context?: string;
+  // gotcha-specific
+  source?: string;
+  failed?: boolean;
+};
+
+export type CheckpointInput = {
+  journal?: string;
+  handoff?: string;
+  state?: Partial<WorkspaceState>;
+  knowledge?: CheckpointKnowledgeEntry[];
+};
+
+export type CheckpointResult = {
+  journal: boolean;
+  handoff: boolean;
+  state: string[];
+  knowledge: { added: number; errors: string[] };
+};
+
 export type CreateWorkspaceOptions = {
   areas?: string[];
   links?: WorkspaceLinks;
