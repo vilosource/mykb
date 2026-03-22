@@ -610,7 +610,8 @@ workCmd
     const updated = storage.readWorkspace(id)!;
     const journal = storage.readJournal(id, 3);
     const areaContexts = fetchAreaContexts(updated.areas);
-    process.stdout.write(renderWorkspace(updated, journal, areaContexts));
+    const handoff = storage.readHandoff(id);
+    process.stdout.write(renderWorkspace(updated, journal, areaContexts, handoff));
   });
 
 workCmd
@@ -620,6 +621,34 @@ workCmd
     const storage = createWorkspaceStorage();
     storage.clearActiveWorkspaceId();
     console.log('Workspace stopped');
+  });
+
+workCmd
+  .command('handoff [text]')
+  .description('Capture what you are working on and what is next, so the next session can resume without ramp-up')
+  .option('--clear', 'Remove the handoff')
+  .action((text: string | undefined, opts: { clear?: boolean }) => {
+    const storage = createWorkspaceStorage();
+    const activeId = requireActiveWorkspace(storage);
+
+    if (opts.clear) {
+      storage.clearHandoff(activeId);
+      console.log('Handoff cleared');
+      return;
+    }
+
+    if (text === undefined || text === '-') {
+      // Read from stdin
+      const input = fs.readFileSync(0, 'utf-8').trim();
+      if (!input) {
+        process.stderr.write('Error: no handoff text provided.\n');
+        process.exit(1);
+      }
+      storage.writeHandoff(activeId, input);
+    } else {
+      storage.writeHandoff(activeId, text);
+    }
+    console.log(`Handoff saved for '${activeId}'`);
   });
 
 workCmd
@@ -784,7 +813,8 @@ workCmd
     }
     const journal = storage.readJournal(wsId, 5);
     const areaContexts = fetchAreaContexts(ws.areas);
-    process.stdout.write(renderWorkspace(ws, journal, areaContexts));
+    const handoff = storage.readHandoff(wsId);
+    process.stdout.write(renderWorkspace(ws, journal, areaContexts, handoff));
   });
 
 workCmd

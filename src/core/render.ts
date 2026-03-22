@@ -1,4 +1,4 @@
-import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext } from './types.js';
+import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext, HandoffData } from './types.js';
 import { ProvenanceStatus } from './types.js';
 
 function capitalizeZone(zone: string): string {
@@ -80,10 +80,25 @@ export function renderWorkspace(
   workspace: Workspace,
   journalEntries: JournalEntry[],
   areaContexts?: AreaContext[],
+  handoff?: HandoffData | null,
 ): string {
   const lines: string[] = [];
 
   lines.push(`# ${workspace.name} (${workspace.id})`);
+
+  // Handoff (Resume section) — rendered first for cold-start agents
+  if (handoff) {
+    const dateStr = handoff.updated ? handoff.updated.split('T')[0] : 'unknown';
+    // Stale detection: if newest journal entry is newer than handoff, mark as possibly outdated
+    const newestJournal = journalEntries.length > 0
+      ? journalEntries[journalEntries.length - 1].date
+      : null;
+    const isStale = newestJournal && handoff.updated && newestJournal > handoff.updated;
+    const staleSuffix = isStale ? ', may be outdated' : '';
+    lines.push('');
+    lines.push(`## Resume (${dateStr}${staleSuffix})`);
+    lines.push(handoff.text);
+  }
 
   // Repos
   if (workspace.links.repos && workspace.links.repos.length > 0) {

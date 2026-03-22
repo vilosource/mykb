@@ -48,7 +48,8 @@ export function createBeforeAgentStartHandler(
         const workspace = wsStorage.readWorkspace(activeId);
         if (workspace) {
           const journalEntries = wsStorage.readJournal(activeId, 3);
-          const rendered = renderWorkspace(workspace, journalEntries);
+          const handoff = wsStorage.readHandoff(activeId);
+          const rendered = renderWorkspace(workspace, journalEntries, undefined, handoff);
           workspaceBlock = `\n\n<mykb-workspace>\n${rendered}</mykb-workspace>\n`;
           state.setBoostedAreas(workspace.areas);
         }

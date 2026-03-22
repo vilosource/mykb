@@ -342,4 +342,71 @@ describe('kb work CLI', () => {
       expect(show.exitCode).toBe(1);
     });
   });
+
+  describe('handoff', () => {
+    beforeEach(() => {
+      runKb('work create test-ws "Test Workspace"');
+      runKb('work start test-ws');
+    });
+
+    it('saves a handoff from positional arg', () => {
+      const { stdout, exitCode } = runKb('work handoff "Working on step 3. Next: tests."');
+      expect(exitCode).toBe(0);
+      expect(stdout.toLowerCase()).toContain('handoff');
+      expect(stdout).toContain('test-ws');
+    });
+
+    it('reads handoff via stdin', () => {
+      // Write handoff via positional first, then verify start renders it
+      runKb('work handoff "Stdin test content"');
+      const { stdout } = runKb('work start test-ws');
+      expect(stdout).toContain('Stdin test content');
+    });
+
+    it('overwrites previous handoff', () => {
+      runKb('work handoff "First handoff"');
+      runKb('work handoff "Second handoff"');
+      const { stdout } = runKb('work start test-ws');
+      expect(stdout).toContain('Second handoff');
+      expect(stdout).not.toContain('First handoff');
+    });
+
+    it('clears handoff with --clear', () => {
+      runKb('work handoff "Some context"');
+      const { stdout, exitCode } = runKb('work handoff --clear');
+      expect(exitCode).toBe(0);
+      expect(stdout.toLowerCase()).toContain('cleared');
+
+      // Verify handoff no longer renders on start
+      const start = runKb('work start test-ws');
+      expect(start.stdout).not.toContain('Resume');
+      expect(start.stdout).not.toContain('Some context');
+    });
+
+    it('renders handoff as Resume section on work start', () => {
+      runKb('work handoff "Implementing store layer. Next: write CLI tests."');
+      const { stdout } = runKb('work start test-ws');
+      expect(stdout).toContain('## Resume');
+      expect(stdout).toContain('Implementing store layer');
+    });
+
+    it('renders handoff before state fields', () => {
+      runKb('work state --phase "v1.0"');
+      runKb('work handoff "Working on feature X"');
+      const { stdout } = runKb('work start test-ws');
+
+      const resumePos = stdout.indexOf('## Resume');
+      const phasePos = stdout.indexOf('Phase:');
+      expect(resumePos).toBeGreaterThan(-1);
+      expect(phasePos).toBeGreaterThan(-1);
+      expect(resumePos).toBeLessThan(phasePos);
+    });
+
+    it('errors without active workspace', () => {
+      runKb('work stop');
+      const { stdout, exitCode } = runKb('work handoff "some text"');
+      expect(exitCode).toBe(1);
+      expect(stdout.toLowerCase()).toContain('no active workspace');
+    });
+  });
 });

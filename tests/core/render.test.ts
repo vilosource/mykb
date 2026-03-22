@@ -6,7 +6,7 @@ import {
   renderJson,
   renderWorkspace,
 } from '../../src/core/render.js';
-import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext } from '../../src/core/types.js';
+import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext, HandoffData } from '../../src/core/types.js';
 import { Zone, ProvenanceStatus } from '../../src/core/types.js';
 
 function makeEntry(overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry {
@@ -410,5 +410,117 @@ describe('renderWorkspace', () => {
     expect(statePos).toBeLessThan(areasPos);
     expect(areasPos).toBeLessThan(artifactsPos);
     expect(artifactsPos).toBeLessThan(journalPos);
+  });
+
+  describe('handoff rendering', () => {
+    it('renders Resume section with date when handoff is provided', () => {
+      const ws = makeWorkspace();
+      const handoff: HandoffData = {
+        text: 'Working on step 3. Next: write tests.',
+        updated: '2026-03-22T14:30:00.000Z',
+      };
+      const output = renderWorkspace(ws, [], undefined, handoff);
+      expect(output).toContain('## Resume (2026-03-22)');
+      expect(output).toContain('Working on step 3. Next: write tests.');
+    });
+
+    it('does not render Resume section when no handoff', () => {
+      const ws = makeWorkspace();
+      const output = renderWorkspace(ws, [], undefined, null);
+      expect(output).not.toContain('## Resume');
+    });
+
+    it('does not render Resume section when handoff is undefined', () => {
+      const ws = makeWorkspace();
+      const output = renderWorkspace(ws, []);
+      expect(output).not.toContain('## Resume');
+    });
+
+    it('renders handoff before state fields', () => {
+      const ws = makeWorkspace();
+      const handoff: HandoffData = {
+        text: 'Handoff content here.',
+        updated: '2026-03-22T14:30:00.000Z',
+      };
+      const output = renderWorkspace(ws, [], undefined, handoff);
+      const resumePos = output.indexOf('## Resume');
+      const statePos = output.indexOf('Phase:');
+      expect(resumePos).toBeGreaterThan(-1);
+      expect(statePos).toBeGreaterThan(-1);
+      expect(resumePos).toBeLessThan(statePos);
+    });
+
+    it('marks handoff as possibly outdated when journal is newer', () => {
+      const ws = makeWorkspace();
+      const handoff: HandoffData = {
+        text: 'Old handoff.',
+        updated: '2026-03-20T10:00:00.000Z',
+      };
+      const journal: JournalEntry[] = [
+        { date: '2026-03-21T10:00:00.000Z', text: 'Newer work happened' },
+      ];
+      const output = renderWorkspace(ws, journal, undefined, handoff);
+      expect(output).toContain('## Resume (2026-03-20, may be outdated)');
+    });
+
+    it('does not mark handoff as outdated when it is newer than journal', () => {
+      const ws = makeWorkspace();
+      const handoff: HandoffData = {
+        text: 'Fresh handoff.',
+        updated: '2026-03-22T14:30:00.000Z',
+      };
+      const journal: JournalEntry[] = [
+        { date: '2026-03-21T10:00:00.000Z', text: 'Older work' },
+      ];
+      const output = renderWorkspace(ws, journal, undefined, handoff);
+      expect(output).toContain('## Resume (2026-03-22)');
+      expect(output).not.toContain('may be outdated');
+    });
+
+    it('renders multi-line handoff text', () => {
+      const ws = makeWorkspace();
+      const handoff: HandoffData = {
+        text: 'Line 1: doing X.\nLine 2: next Y.\nLine 3: blocked on Z.',
+        updated: '2026-03-22T14:30:00.000Z',
+      };
+      const output = renderWorkspace(ws, [], undefined, handoff);
+      expect(output).toContain('Line 1: doing X.');
+      expect(output).toContain('Line 2: next Y.');
+      expect(output).toContain('Line 3: blocked on Z.');
+    });
+
+    it('renders full section order: resume → repos → state → areas → artifacts → journal', () => {
+      const ws = makeWorkspace({
+        links: { repos: ['/path/to/repo'], jira: 'PROJ-1' },
+      });
+      const areaContexts: AreaContext[] = [
+        {
+          id: 'stark',
+          summary: 'Test area',
+          stats: { facts: 1, decisions: 0, gotchas: 0, patterns: 0, links: 0 },
+        },
+      ];
+      const journal: JournalEntry[] = [
+        { date: '2026-03-15T00:00:00.000Z', text: 'Did something' },
+      ];
+      const handoff: HandoffData = {
+        text: 'Resume context.',
+        updated: '2026-03-22T00:00:00.000Z',
+      };
+      const output = renderWorkspace(ws, journal, areaContexts, handoff);
+
+      const resumePos = output.indexOf('## Resume');
+      const reposPos = output.indexOf('Repos:');
+      const statePos = output.indexOf('Phase:');
+      const areasPos = output.indexOf('## Knowledge Areas');
+      const artifactsPos = output.indexOf('Artifacts:');
+      const journalPos = output.indexOf('## Recent Journal');
+
+      expect(resumePos).toBeLessThan(reposPos);
+      expect(reposPos).toBeLessThan(statePos);
+      expect(statePos).toBeLessThan(areasPos);
+      expect(areasPos).toBeLessThan(artifactsPos);
+      expect(artifactsPos).toBeLessThan(journalPos);
+    });
   });
 });
