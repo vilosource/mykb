@@ -9,6 +9,7 @@ import type {
   CreateWorkspaceOptions,
   JournalEntry,
   NoteEntry,
+  HandoffData,
   AddArtifactOptions,
   ArtifactEntry,
   ArtifactSyncResult,
@@ -282,6 +283,52 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     }
     const tombstone = { id: noteId, deleted: true, updated: new Date().toISOString() };
     fs.appendFileSync(this.notesFile(id), JSON.stringify(tombstone) + '\n');
+  }
+
+  // --- Handoff methods ---
+
+  private continuityFile(id: string): string {
+    return path.join(this.workspaceDir(id), 'continuity.md');
+  }
+
+  writeHandoff(id: string, text: string): void {
+    this.requireWorkspace(id);
+    const now = new Date().toISOString();
+    const content = `---\nupdated: ${now}\n---\n${text}\n`;
+    fs.writeFileSync(this.continuityFile(id), content);
+  }
+
+  readHandoff(id: string): HandoffData | null {
+    const file = this.continuityFile(id);
+    if (!fs.existsSync(file)) return null;
+
+    const raw = fs.readFileSync(file, 'utf-8');
+    if (!raw.trim()) return null;
+
+    // Parse YAML frontmatter
+    let updated = '';
+    let textStart = 0;
+
+    if (raw.startsWith('---\n')) {
+      const endIdx = raw.indexOf('\n---\n', 4);
+      if (endIdx !== -1) {
+        const frontmatter = raw.slice(4, endIdx);
+        const match = frontmatter.match(/^updated:\s*(.+)$/m);
+        if (match) updated = match[1].trim();
+        textStart = endIdx + 5; // skip past \n---\n
+      }
+    }
+
+    const text = raw.slice(textStart).trim();
+    if (!text) return null;
+
+    return { text, updated };
+  }
+
+  clearHandoff(id: string): void {
+    this.requireWorkspace(id);
+    const file = this.continuityFile(id);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
   }
 
   // --- Artifact methods ---
