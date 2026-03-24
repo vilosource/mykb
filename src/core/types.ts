@@ -294,6 +294,7 @@ export type CreateWorkspaceOptions = {
 export interface WorkspaceStorage {
   createWorkspace(id: string, name: string, options?: CreateWorkspaceOptions): void;
   readWorkspace(id: string): Workspace | null;
+  resolveWorkspaceId(id: string): string;
   updateWorkspaceState(id: string, state: Partial<WorkspaceState>): void;
   updateWorkspaceLinks(id: string, links: Partial<WorkspaceLinks>): void;
   linkArea(id: string, area: string): void;

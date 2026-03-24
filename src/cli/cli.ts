@@ -589,28 +589,30 @@ workCmd
   .description('Set active workspace')
   .action((id: string) => {
     const storage = createWorkspaceStorage();
-    const ws = storage.readWorkspace(id);
-    if (!ws) {
-      process.stderr.write(`Error: workspace '${id}' not found.\n`);
+    let resolvedId: string;
+    try {
+      resolvedId = storage.resolveWorkspaceId(id);
+    } catch (err) {
+      process.stderr.write(`Error: ${(err as Error).message}\n`);
       process.exit(1);
     }
-    storage.setActiveWorkspaceId(id);
+    storage.setActiveWorkspaceId(resolvedId);
 
     // Auto-sync: register untracked .md files in docs/
-    const syncResult = storage.syncArtifacts(id);
+    const syncResult = storage.syncArtifacts(resolvedId);
     if (syncResult.untracked.length > 0) {
-      const docsDir = path.join(resolveBrainPath(), 'workspaces', id, 'docs');
+      const docsDir = path.join(resolveBrainPath(), 'workspaces', resolvedId, 'docs');
       for (const f of syncResult.untracked) {
         const content = fs.readFileSync(path.join(docsDir, f), 'utf-8');
-        storage.addArtifact(id, f, content);
+        storage.addArtifact(resolvedId, f, content);
       }
     }
 
     // Re-read workspace to get updated artifacts
-    const updated = storage.readWorkspace(id)!;
-    const journal = storage.readJournal(id, 3);
+    const updated = storage.readWorkspace(resolvedId)!;
+    const journal = storage.readJournal(resolvedId, 3);
     const areaContexts = fetchAreaContexts(updated.areas);
-    const handoff = storage.readHandoff(id);
+    const handoff = storage.readHandoff(resolvedId);
     process.stdout.write(renderWorkspace(updated, journal, areaContexts, handoff));
   });
 
@@ -897,16 +899,23 @@ workCmd
   .description('Show workspace details')
   .action((id?: string) => {
     const storage = createWorkspaceStorage();
-    const wsId = id ?? storage.getActiveWorkspaceId();
-    if (!wsId) {
-      process.stderr.write('Error: no active workspace. Provide an id or run "kb work start <id>".\n');
-      process.exit(1);
+    let wsId: string;
+    if (id) {
+      try {
+        wsId = storage.resolveWorkspaceId(id);
+      } catch (err) {
+        process.stderr.write(`Error: ${(err as Error).message}\n`);
+        process.exit(1);
+      }
+    } else {
+      const activeId = storage.getActiveWorkspaceId();
+      if (!activeId) {
+        process.stderr.write('Error: no active workspace. Provide an id or run "kb work start <id>".\n');
+        process.exit(1);
+      }
+      wsId = activeId;
     }
-    const ws = storage.readWorkspace(wsId);
-    if (!ws) {
-      process.stderr.write(`Error: workspace '${wsId}' not found.\n`);
-      process.exit(1);
-    }
+    const ws = storage.readWorkspace(wsId)!;
     const journal = storage.readJournal(wsId, 5);
     const areaContexts = fetchAreaContexts(ws.areas);
     const handoff = storage.readHandoff(wsId);
@@ -918,12 +927,19 @@ workCmd
   .description('Archive a workspace')
   .action((id: string) => {
     const storage = createWorkspaceStorage();
+    let resolvedId: string;
+    try {
+      resolvedId = storage.resolveWorkspaceId(id);
+    } catch (err) {
+      process.stderr.write(`Error: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
     const activeId = storage.getActiveWorkspaceId();
-    storage.archiveWorkspace(id);
-    if (activeId === id) {
+    storage.archiveWorkspace(resolvedId);
+    if (activeId === resolvedId) {
       storage.clearActiveWorkspaceId();
     }
-    console.log(`Workspace '${id}' archived`);
+    console.log(`Workspace '${resolvedId}' archived`);
   });
 
 // --- Workspace Artifacts (wsa) ---

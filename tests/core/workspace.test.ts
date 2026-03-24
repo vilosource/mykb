@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { withTempBrain } from '../helpers.js';
 import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
 import type { Workspace, WorkspaceState, ArtifactEntry, HandoffData } from '../../src/core/types.js';
-import { EntryValidationError, ArtifactNotFoundError } from '../../src/core/errors.js';
+import { EntryValidationError, ArtifactNotFoundError, WorkspaceNotFoundError } from '../../src/core/errors.js';
 
 describe('FileSystemWorkspaceStorage CRUD', () => {
   it('createWorkspace creates workspace.json with correct structure', async () => {
@@ -1169,6 +1169,55 @@ describe('FileSystemWorkspaceStorage Session Isolation (KB_SESSION_ID)', () => {
         const second = storage.readHandoff('proj')!.updated;
 
         expect(second).not.toBe(first);
+      });
+    });
+  });
+
+  describe('resolveWorkspaceId', () => {
+    it('returns exact match when ID matches', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('stark-picking', 'Stark Picking');
+        expect(storage.resolveWorkspaceId('stark-picking')).toBe('stark-picking');
+      });
+    });
+
+    it('returns single prefix match', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('stark-picking', 'Stark Picking');
+        storage.createWorkspace('monitoring', 'Monitoring');
+        expect(storage.resolveWorkspaceId('stark')).toBe('stark-picking');
+      });
+    });
+
+    it('throws with candidates when multiple prefix matches', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('stark-picking', 'Stark Picking');
+        storage.createWorkspace('stark-deploy', 'Stark Deploy');
+        expect(() => storage.resolveWorkspaceId('stark')).toThrow(WorkspaceNotFoundError);
+        expect(() => storage.resolveWorkspaceId('stark')).toThrow(/ambiguous/);
+        expect(() => storage.resolveWorkspaceId('stark')).toThrow(/stark-picking/);
+        expect(() => storage.resolveWorkspaceId('stark')).toThrow(/stark-deploy/);
+      });
+    });
+
+    it('throws WorkspaceNotFoundError when no match', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('monitoring', 'Monitoring');
+        expect(() => storage.resolveWorkspaceId('nonexistent')).toThrow(WorkspaceNotFoundError);
+        expect(() => storage.resolveWorkspaceId('nonexistent')).toThrow(/not found/);
+      });
+    });
+
+    it('prefers exact match over prefix match', async () => {
+      await withTempBrain(async (brainPath) => {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('stark', 'Stark');
+        storage.createWorkspace('stark-picking', 'Stark Picking');
+        expect(storage.resolveWorkspaceId('stark')).toBe('stark');
       });
     });
   });

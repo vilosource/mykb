@@ -107,6 +107,33 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     return this.readWorkspaceFile(id);
   }
 
+  resolveWorkspaceId(id: string): string {
+    // Exact match first
+    if (this.readWorkspaceFile(id)) return id;
+
+    // Prefix match
+    if (!fs.existsSync(this.workspacesDir)) {
+      throw new WorkspaceNotFoundError(`Workspace '${id}' not found.`);
+    }
+
+    const entries = fs.readdirSync(this.workspacesDir, { withFileTypes: true });
+    const matches: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === 'archive') continue;
+      if (entry.name.startsWith(id)) {
+        matches.push(entry.name);
+      }
+    }
+
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) {
+      throw new WorkspaceNotFoundError(
+        `Workspace '${id}' is ambiguous. Did you mean: ${matches.join(', ')}?`,
+      );
+    }
+    throw new WorkspaceNotFoundError(`Workspace '${id}' not found.`);
+  }
+
   updateWorkspaceState(id: string, state: Partial<WorkspaceState>): void {
     const ws = this.requireWorkspace(id);
     ws.state = { ...ws.state, ...state };

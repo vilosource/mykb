@@ -107,6 +107,31 @@ describe('kb work CLI', () => {
       const { stdout } = runKb('work start test-ws');
       expect(stdout).toContain('kb load');
     });
+
+    it('resolves workspace by prefix', () => {
+      runKb('work create stark-picking "Stark Picking"');
+      const { stdout, exitCode } = runKb('work start stark');
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain('Stark Picking');
+      expect(stdout).toContain('stark-picking');
+    });
+
+    it('shows candidates when prefix is ambiguous', () => {
+      runKb('work create stark-picking "Stark Picking"');
+      runKb('work create stark-deploy "Stark Deploy"');
+      const { stderr, exitCode } = runKb('work start stark');
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('ambiguous');
+      expect(stderr).toContain('stark-picking');
+      expect(stderr).toContain('stark-deploy');
+    });
+
+    it('errors when no workspace matches prefix', () => {
+      runKb('work create test-ws "Test"');
+      const { stderr, exitCode } = runKb('work start nonexistent');
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('not found');
+    });
   });
 
   describe('state', () => {
