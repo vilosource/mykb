@@ -24,14 +24,23 @@ prepare() {
   kb work journal "scaffolded the rate-limiter module"
   kb work handoff "Marker ${HANDOFF_MARKER}: rate-limiter half-done; next session continue with token-bucket logic."
   kb save
+
+  # Materialize the kb context file vfa's claude adapter ships to the
+  # LLM via --append-system-prompt-file. Pi's auto-injection is
+  # automatic via session hooks; Claude Code's headless mode requires
+  # this explicit export step (additionalContext from SessionStart
+  # hooks doesn't reach the LLM in -p mode — Anthropic-documented
+  # interactive-only behavior).
+  spike_export_context
 }
 
 stimulate() {
-  # The prompt deliberately doesn't mention kb, handoff, workspace, or
-  # any related concepts. If the LLM cites the marker, it must have
-  # come in via the hook's additionalContext at session begin —
-  # nothing else surfaces it.
-  step "ask-resume" --prompt "Hi. Brief one-line answer: what was I last working on, and what's the next step?"
+  # The LLM sees the workspace block via --append-system-prompt-file.
+  # Force a verbatim quote of any line starting with 'Marker' so the
+  # assertion pins on the marker token (paraphrased answers were
+  # passing the contract semantically but failing the marker check —
+  # same LLM-variance pattern we hit in the Pi matrices).
+  step "ask-resume" --prompt "Quote verbatim, in one line, any line in your context starting with the word 'Marker'."
 }
 
 observe() {

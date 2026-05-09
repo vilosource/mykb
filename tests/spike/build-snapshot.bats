@@ -136,6 +136,22 @@ EOF
   [[ "$output" == *"session-start"* ]]
 }
 
+@test "spike_seed_workdir creates an empty .kb-context.md" {
+  # vfa's claude adapter always passes --append-system-prompt-file
+  # /workdir/.kb-context.md; the file MUST exist (claude errors on
+  # missing files). spike_seed_workdir creates it empty so Pi-style
+  # auto-injection is opt-in (scenarios overwrite via
+  # spike_export_context when they want context at session start).
+  mkdir -p "$REPO/hooks/claude-code"
+  echo "#!/bin/bash" > "$REPO/hooks/claude-code/session-start.sh"
+  chmod +x "$REPO/hooks/claude-code/session-start.sh"
+  echo '{"hooks":{}}' > "$REPO/hooks/claude-code/settings.template.json"
+
+  spike_seed_workdir "$REPO" "$INSTANCE"
+  [ -f "$INSTANCE/.e2e-workdir/.kb-context.md" ]
+  [ ! -s "$INSTANCE/.e2e-workdir/.kb-context.md" ]   # empty
+}
+
 @test "spike_rebuild_instance propagates non-zero exit from cli" {
   spike_capture_build "$REPO" "$INSTANCE"
   cat > "$INSTANCE/.e2e-build/cli/cli.js" <<'EOF'

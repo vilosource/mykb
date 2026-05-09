@@ -35,14 +35,21 @@ This experiment proves:
 - **`bare-runs` passes** — harness drives Claude Code via `zai-glm` end-to-end: profile generation (with `workdir.type: persistent` pointing at the per-experiment seed dir), container start, prompt, response capture, runtime detection in `step.sh` for the right `--provider`. The full claude-code lane through the harness is operational.
 - **kb-spike runtime support is shipped:** `kb-spike new --runtime claude-code` works; meta records the runtime; `step.sh` routes `--provider zai-glm` automatically; `spike_seed_workdir` populates the workdir-seed from `hooks/claude-code/`. All wired at the unit-test level (bats) and verified end-to-end.
 
-### What doesn't yet work (⏳)
+### Diagnostic chain (kept for the post-mortem)
 
-- **`hook-injects-handoff` does NOT pass.** Definitively diagnosed end of this session. The chain to making the hook fire required several discoveries:
-  1. `claude -p` does NOT load project-level `.claude/settings.json` by default — needs `--setting-sources user,project,local` explicitly. **Patched vfa's claude adapter** in `internal/adapter/claude.go` to pass it; rebuilt + reinstalled.
-  2. vfa's claude adapter mounts the workdir at `/workdir`, not the profile's declared `mount_path`. **Aligned `mount_path: /workdir` in the profile** so docker exec's cwd matches where the workdir is bound — otherwise claude looks for `.claude/settings.json` in an empty path.
-  3. After (1) and (2): the hook **does fire** (verified via breadcrumb file + `--include-hook-events` stream output), and emits well-formed JSON with `additionalContext` containing the marker. **But the LLM never sees that context.**
-  4. **Root cause:** `additionalContext` from `SessionStart` hooks **is not injected into the LLM in `-p` mode**. Confirmed via Claude Code documentation lookup: this field is for interactive sessions only. Print mode strips the interactive context-injection pipeline; the hook's output is processed but never reaches the model.
+Reaching `pass=true` on `hook-injects-handoff` required four sequential discoveries; each one closed a layer:
 
-  **The documented path forward for headless context injection is `--append-system-prompt-file`.** That requires another vfa adapter change — accept a per-experiment path and pass it through. Out of scope for this commit; logged as the v2 follow-up.
+1. **`claude -p` doesn't load project-level `.claude/settings.json` by default.** Needs `--setting-sources user,project,local` explicitly. Patched in vfa's claude adapter (`internal/adapter/claude.go`).
+2. **vfa hardcodes the workdir mount at `/workdir`**, regardless of the profile's `mount_path`. Setting `mount_path` to anything else (we had `/workspace`) makes docker exec's cwd diverge from where the workdir is bound, and claude looks for settings.json in the wrong place. Aligned `mount_path: /workdir` in profile.sh's claude-code branch.
+3. After (1) + (2): the SessionStart hook **fires** — verified via breadcrumb file and `--include-hook-events` showing `hook_started` + `hook_response` with well-formed JSON containing the marker.
+4. **But `additionalContext` from `SessionStart` hooks is interactive-only.** It is silently dropped in `-p` mode. The documented path for headless injection is `--append-system-prompt-file`.
 
-  **The infrastructure that IS in place** — the `--runtime claude-code` flag, profile generation, workdir-seed mechanism, hook scripts (which fire correctly), and vfa adapter patches for `--setting-sources` + cwd alignment — all become useful once the file-based injection path is added. No throwaway work.
+### How `hook-injects-handoff` passes today
+
+After (1)–(4), the contract was reconfigured:
+
+- The harness writes the workspace block to `<instance>/.e2e-workdir/.kb-context.md` via the new `spike_export_context` scenario helper (defined in `step.sh`). Pi runtime experiments don't call this; their auto-injection happens via session hooks.
+- vfa's claude adapter unconditionally passes `--append-system-prompt-file /workdir/.kb-context.md` to claude. `spike_seed_workdir` always creates an empty `.kb-context.md` so the file exists; scenarios overwrite it with content via `spike_export_context`.
+- claude prepends the file's contents to the system prompt; the LLM sees the kb context from the first turn, regardless of `-p` mode.
+
+The `SessionStart` hook script + `.claude/settings.json` are still installed in the workdir-seed for completeness, but they're no longer load-bearing for the L4 contract — they would matter for interactive sessions only. Treat them as documentation of the discovery rather than the production path.

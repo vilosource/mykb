@@ -111,6 +111,46 @@ step() {
   return $rc
 }
 
+# spike_export_context
+#
+# Headless-Claude-Code companion to Pi's auto-injection. Pi's session
+# hook injects the workspace state into the system prompt automatically;
+# Claude Code's `-p` mode does not honor `additionalContext` from
+# SessionStart hooks (interactive-only — confirmed by Anthropic docs).
+# The documented headless path is `--append-system-prompt-file`, which
+# vfa's claude adapter passes pointing at /workdir/.kb-context.md.
+#
+# Scenarios call this in prepare() (after writing handoff/journal/state
+# via the `kb` wrapper) to materialize that file. Pi scenarios don't
+# need to call it; the function is a no-op when the workdir-seed
+# doesn't exist.
+spike_export_context() {
+  if [[ -z "${SPIKE_INSTANCE:-}" ]]; then
+    echo "spike_export_context: SPIKE_INSTANCE is unset" >&2
+    return 1
+  fi
+  local seed="$SPIKE_INSTANCE/.e2e-workdir"
+  [[ -d "$seed" ]] || return 0   # not a claude-code experiment; nothing to do.
+
+  local cli="$SPIKE_INSTANCE/.e2e-build/cli/cli.js"
+  if [[ ! -f "$cli" ]]; then
+    echo "spike_export_context: captured cli missing at $cli" >&2
+    return 1
+  fi
+  # `kb work show` against the captured cli — wrap with mykb tags so the
+  # LLM can recognize the surface (parallels Pi's <mykb-workspace>).
+  local body
+  if body="$( MYKB_DIR="$SPIKE_INSTANCE" node "$cli" work show 2>/dev/null )"; then
+    {
+      echo "<mykb-workspace>"
+      echo "$body"
+      echo "</mykb-workspace>"
+    } > "$seed/.kb-context.md"
+  else
+    : > "$seed/.kb-context.md"
+  fi
+}
+
 # kb <args>...
 #
 # Wrapper around the captured cli. Scenarios use this to drive workspace

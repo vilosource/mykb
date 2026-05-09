@@ -232,3 +232,50 @@ EOF
   run kb anything
   [ "$status" -ne 0 ]
 }
+
+# spike_export_context — scenarios call this to materialize the
+# .kb-context.md file vfa's claude adapter ships to the LLM via
+# --append-system-prompt-file.
+@test "spike_export_context wraps kb work show output in <mykb-workspace>" {
+  mkdir -p "$INSTANCE/.e2e-workdir"
+  cat > "$INSTANCE/.e2e-build/cli/cli.js" <<'EOF'
+// Stub: emit a workspace block when called as `work show`.
+const args = process.argv.slice(2);
+if (args[0] === "work" && args[1] === "show") {
+  console.log("# Demo Workspace\n\n## Resume\nMarker XYZ: in flight.");
+  process.exit(0);
+}
+process.exit(1);
+EOF
+  spike_export_context
+  ctx="$INSTANCE/.e2e-workdir/.kb-context.md"
+  [ -f "$ctx" ]
+  grep -q "<mykb-workspace>" "$ctx"
+  grep -q "Marker XYZ" "$ctx"
+  grep -q "</mykb-workspace>" "$ctx"
+}
+
+@test "spike_export_context produces empty file when kb work show fails" {
+  mkdir -p "$INSTANCE/.e2e-workdir"
+  cat > "$INSTANCE/.e2e-build/cli/cli.js" <<'EOF'
+process.exit(2);
+EOF
+  spike_export_context
+  ctx="$INSTANCE/.e2e-workdir/.kb-context.md"
+  [ -f "$ctx" ]
+  [ ! -s "$ctx" ]
+}
+
+@test "spike_export_context is a no-op when workdir-seed missing" {
+  # Pi runtime experiments don't have .e2e-workdir; the function
+  # must not error in that case.
+  [ ! -d "$INSTANCE/.e2e-workdir" ]
+  spike_export_context
+  [ "$?" -eq 0 ]
+}
+
+@test "spike_export_context errors when SPIKE_INSTANCE unset" {
+  unset SPIKE_INSTANCE
+  run spike_export_context
+  [ "$status" -ne 0 ]
+}

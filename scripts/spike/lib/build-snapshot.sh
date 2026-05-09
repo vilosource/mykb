@@ -127,6 +127,13 @@ spike_seed_workdir() {
   cp "$hooks_src/session-start.sh" "$seed/.claude/hooks/session-start.sh"
   chmod +x "$seed/.claude/hooks/session-start.sh"
   cp "$hooks_src/settings.template.json" "$seed/.claude/settings.json"
+
+  # Always create an empty .kb-context.md so vfa's claude adapter can
+  # unconditionally pass --append-system-prompt-file pointing at it.
+  # Scenarios overwrite this file with `spike_export_context` (defined
+  # in step.sh) when they need the LLM to see the workspace state at
+  # session start.
+  : > "$seed/.kb-context.md"
 }
 
 spike_rebuild_instance() {
