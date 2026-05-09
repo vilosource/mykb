@@ -90,6 +90,18 @@ spike_run_scenario() {
     git checkout -q -b "e2e/$scenario" "e2e/source"
   )
 
+  # Regenerate kb.db from the just-checked-out JSONL. kb.db is
+  # gitignored, so a prior scenario's mutations stay in SQLite even
+  # after switching branches — leaking state into the new scenario's
+  # search/scoring operations. Rebuilding here makes SQLite consistent
+  # with the JSONL files in the working tree.
+  # shellcheck source=build-snapshot.sh
+  source "$lib/build-snapshot.sh"
+  spike_rebuild_instance "$instance" >/dev/null || {
+    echo "spike_run_scenario: failed to rebuild instance SQLite" >&2
+    return 1
+  }
+
   # Default no-op implementations so a scenario can omit any phase.
   prepare()   { :; }
   stimulate() { :; }
