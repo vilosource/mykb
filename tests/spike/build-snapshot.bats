@@ -15,9 +15,9 @@ setup() {
   REPO="$TMP/repo"
   INSTANCE="$TMP/instance"
 
-  mkdir -p "$REPO/dist/bundle" "$REPO/dist/cli"
+  mkdir -p "$REPO/dist/bundle" "$REPO/dist/cli-bundle"
   echo "// fake bundle" > "$REPO/dist/bundle/index.js"
-  echo "// fake cli" > "$REPO/dist/cli/cli.js"
+  echo "// fake cli" > "$REPO/dist/cli-bundle/cli.js"
   (
     cd "$REPO"
     git init -q -b main
@@ -69,8 +69,8 @@ teardown() {
   [[ "$output" == *"bundle"* ]]
 }
 
-@test "spike_capture_build refuses when cli is missing" {
-  rm "$REPO/dist/cli/cli.js"
+@test "spike_capture_build refuses when cli bundle is missing" {
+  rm "$REPO/dist/cli-bundle/cli.js"
   run spike_capture_build "$REPO" "$INSTANCE"
   [ "$status" -ne 0 ]
   [[ "$output" == *"cli"* ]]

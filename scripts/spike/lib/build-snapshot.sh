@@ -28,30 +28,42 @@ spike_capture_build() {
     return 1
   fi
 
+  # The Pi extension bundle (esbuild --bundle) lives at dist/bundle/.
+  # The CLI ships in two forms: dist/cli/ (tsc, unbundled, broken when
+  # copied because better-sqlite3 isn't resolvable) and dist/cli-bundle/
+  # (esbuild --bundle --format=esm, complete with package.json declaring
+  # type:module and node_modules/better-sqlite3). We always capture from
+  # cli-bundle so the captured tree is self-contained.
   local bundle_src="$repo/dist/bundle/index.js"
-  local cli_src="$repo/dist/cli/cli.js"
+  local cli_src="$repo/dist/cli-bundle/cli.js"
 
   if [[ ! -f "$bundle_src" ]]; then
     echo "spike_capture_build: bundle missing — run 'npm run bundle' first ($bundle_src)" >&2
     return 1
   fi
   if [[ ! -f "$cli_src" ]]; then
-    echo "spike_capture_build: cli missing — run 'npm run build' first ($cli_src)" >&2
+    echo "spike_capture_build: cli bundle missing — run 'npm run bundle:cli' first ($cli_src)" >&2
     return 1
   fi
 
   local out="$instance/.e2e-build"
   mkdir -p "$out/bundle" "$out/cli"
 
-  # The Pi extension bundle is a single ESM file plus its package.json (so
-  # the runtime resolves the extension entrypoint correctly). CLI mirrors.
+  # Bundle: copy index.js + package.json (so the Pi runtime sees the
+  # extension entrypoint correctly).
   cp "$bundle_src" "$out/bundle/index.js"
   if [[ -f "$repo/dist/bundle/package.json" ]]; then
     cp "$repo/dist/bundle/package.json" "$out/bundle/package.json"
   fi
+
+  # CLI bundle: copy cli.js, its package.json, and node_modules so the
+  # captured CLI runs standalone with `node cli.js`.
   cp "$cli_src" "$out/cli/cli.js"
-  if [[ -f "$repo/dist/cli/package.json" ]]; then
-    cp "$repo/dist/cli/package.json" "$out/cli/package.json"
+  if [[ -f "$repo/dist/cli-bundle/package.json" ]]; then
+    cp "$repo/dist/cli-bundle/package.json" "$out/cli/package.json"
+  fi
+  if [[ -d "$repo/dist/cli-bundle/node_modules" ]]; then
+    cp -r "$repo/dist/cli-bundle/node_modules" "$out/cli/node_modules"
   fi
 
   # Provenance: which commit produced the build, and was the working tree

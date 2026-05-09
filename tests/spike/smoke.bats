@@ -34,9 +34,9 @@ setup() {
   mkdir -p "$SPIKE_REPO_ROOT/scripts"
   cp -r "$REAL_REPO/scripts/spike" "$SPIKE_REPO_ROOT/scripts/spike"
 
-  mkdir -p "$SPIKE_REPO_ROOT/dist/bundle" "$SPIKE_REPO_ROOT/dist/cli"
+  mkdir -p "$SPIKE_REPO_ROOT/dist/bundle" "$SPIKE_REPO_ROOT/dist/cli-bundle"
   echo "// fake bundle" > "$SPIKE_REPO_ROOT/dist/bundle/index.js"
-  cat > "$SPIKE_REPO_ROOT/dist/cli/cli.js" <<'EOF'
+  cat > "$SPIKE_REPO_ROOT/dist/cli-bundle/cli.js" <<'EOF'
 const fs = require("fs");
 const args = process.argv.slice(2);
 const dir = process.env.MYKB_DIR || ".";
