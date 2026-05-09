@@ -9,6 +9,10 @@ import { brainExists } from '../../core/config.js';
 import { readManifest } from '../../core/manifest.js';
 import { renderAreaIndex, renderWorkspace } from '../../core/render.js';
 import type { AreaMetadata, WorkspaceStorage } from '../../core/types.js';
+import { filterRecentJournal, cutoffForDays } from '../../core/journal-window.js';
+
+const JOURNAL_INJECT_DAYS = 2;
+const JOURNAL_INJECT_MAX_ENTRIES = 20;
 
 export function createBeforeAgentStartHandler(
   _store: MykbStore,
@@ -47,7 +51,15 @@ export function createBeforeAgentStartHandler(
       if (activeId) {
         const workspace = wsStorage.readWorkspace(activeId);
         if (workspace) {
-          const journalEntries = wsStorage.readJournal(activeId, 3);
+          // Pull the newest N entries from disk, then keep only those within
+          // the recency window. The N cap guards against pathological journals;
+          // the date filter is the actual policy (per docs/journal-auto-inject-DESIGN.md).
+          const allRecent = wsStorage.readJournal(activeId, JOURNAL_INJECT_MAX_ENTRIES);
+          const journalEntries = filterRecentJournal(
+            allRecent,
+            cutoffForDays(JOURNAL_INJECT_DAYS),
+            JOURNAL_INJECT_MAX_ENTRIES,
+          );
           const handoff = wsStorage.readHandoff(activeId);
           const rendered = renderWorkspace(workspace, journalEntries, undefined, handoff);
           workspaceBlock = `\n\n<mykb-workspace>\n${rendered}</mykb-workspace>\n`;
