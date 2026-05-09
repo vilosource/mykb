@@ -66,9 +66,14 @@ step() {
   local step_file
   step_file="$(printf '%s/%03d-%s.json' "$steps_dir" "$SPIKE_STEP_NUM" "$name")"
 
-  # Run vfa. We capture stdout (JSON) and let stderr go to the operator.
-  vfa run --provider pi --profile "e2e-${SPIKE_EXP_ID}" --prompt "$prompt" > "$step_file"
-  local rc=$?
+  # Run vfa. Capture stdout (JSON) to the step file; stderr goes to the
+  # operator. Use `|| rc=$?` instead of relying on $? — the orchestrator
+  # runs with `set -e`, so a non-zero vfa exit would otherwise kill the
+  # whole scenario before we can record what happened. We want vfa
+  # failures to surface as a failed step (via assertions), not as a
+  # crashed harness.
+  local rc=0
+  vfa run --provider pi --profile "e2e-${SPIKE_EXP_ID}" --prompt "$prompt" > "$step_file" || rc=$?
 
   export SPIKE_LAST_STEP_FILE="$step_file"
 
@@ -100,8 +105,10 @@ kb() {
     echo "kb: captured cli not found at $cli" >&2
     return 1
   fi
-  MYKB_DIR="$SPIKE_INSTANCE" node "$cli" "$@"
-  local rc=$?
+  # See step() — `set -e` in the orchestrator would otherwise kill us on
+  # any non-zero exit from the captured cli.
+  local rc=0
+  MYKB_DIR="$SPIKE_INSTANCE" node "$cli" "$@" || rc=$?
 
   (
     cd "$SPIKE_INSTANCE"

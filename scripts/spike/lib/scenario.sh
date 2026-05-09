@@ -78,9 +78,13 @@ spike_run_scenario() {
   # Cut a fresh scenario branch from e2e/source. If the same scenario was
   # run before, blow the old branch away — the regression suite re-runs
   # scenarios; we don't want history to bleed across runs.
+  #
+  # Use force-checkout because a prior crashed run may have left the
+  # working tree dirty (incomplete step file, etc.). The scenario branch
+  # is about to be deleted anyway; nothing to preserve.
   (
     cd "$instance"
-    git checkout -q "e2e/source" 2>/dev/null
+    git checkout -qf "e2e/source" 2>/dev/null
     git branch -D "e2e/$scenario" >/dev/null 2>&1 || true
     git tag  -d  "e2e/$scenario-end" >/dev/null 2>&1 || true
     git checkout -q -b "e2e/$scenario" "e2e/source"
@@ -94,9 +98,13 @@ spike_run_scenario() {
   # shellcheck source=/dev/null
   source "$scenario_file"
 
-  prepare
-  stimulate
-  observe
+  # Each phase runs even if a prior phase threw — we still want to write
+  # a result file with whatever assertions did run. The phase's own exit
+  # is captured into the result via SPIKE_PHASE_*_RC for diagnostics.
+  local prep_rc=0 stim_rc=0 obs_rc=0
+  prepare    || prep_rc=$?
+  stimulate  || stim_rc=$?
+  observe    || obs_rc=$?
 
   # End-of-scenario tag — operator can `git diff e2e/source..e2e/<s>-end`.
   ( cd "$instance" && git tag "e2e/$scenario-end" HEAD )
