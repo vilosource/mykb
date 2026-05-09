@@ -110,6 +110,45 @@ describe('renderAreaIndex', () => {
     const output = renderAreaIndex([]);
     expect(output).toBe('');
   });
+
+  // The LLM-facing kb_list tool surfaces this rendering. Without tags
+  // in the output, the LLM has no path to discover an area by tag —
+  // tags exist in metadata but never reach the model. Bug surfaced by
+  // experiments/area-scoring/scenarios/kb-list-shows-tags.sh.
+  it('appends tags suffix when area has tags', () => {
+    const areas: AreaMetadata[] = [
+      {
+        id: 'widgets',
+        name: 'Widgets',
+        summary: 'Widget knowledge',
+        owner: '',
+        tags: ['blue', 'calibration'],
+        created: '2026-03-15T00:00:00.000Z',
+        updated: '2026-03-15T00:00:00.000Z',
+      },
+    ];
+    const output = renderAreaIndex(areas);
+    expect(output).toContain('widgets');
+    expect(output).toContain('Widget knowledge');
+    expect(output).toContain('[tags: blue, calibration]');
+  });
+
+  it('omits tags suffix when area has no tags (backward compat)', () => {
+    const areas: AreaMetadata[] = [
+      {
+        id: 'untagged',
+        name: 'Untagged',
+        summary: 'No tags here',
+        owner: '',
+        tags: [],
+        created: '2026-03-15T00:00:00.000Z',
+        updated: '2026-03-15T00:00:00.000Z',
+      },
+    ];
+    const output = renderAreaIndex(areas);
+    expect(output).toContain('untagged');
+    expect(output).not.toContain('[tags:');
+  });
 });
 
 describe('renderJson', () => {
