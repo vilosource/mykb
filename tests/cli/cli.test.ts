@@ -89,6 +89,56 @@ describe('kb CLI', () => {
       const networking = manifest.areas.find((a) => a.id === 'networking');
       expect(networking?.summary).toBe('Network knowledge');
     });
+
+    it('init area --tags writes comma-separated tags to area.json', () => {
+      // Outside-in TDD driven by experiments/area-scoring/scenarios/
+      // init-area-tags.sh: the L4 scenario specifies that tags set via
+      // --tags must be discoverable. This unit-side anchor verifies the
+      // CLI parses --tags and threads it into createArea.
+      runKb('init');
+      const { exitCode } = runKb(
+        'init area widgets "Widgets" "Widget knowledge" --tags blue,calibration',
+      );
+      expect(exitCode).toBe(0);
+      const areaJson = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'areas', 'widgets', 'area.json'), 'utf-8'),
+      ) as { tags: string[] };
+      expect(areaJson.tags).toEqual(['blue', 'calibration']);
+    });
+
+    it('init area --tags propagates tags to manifest.json', () => {
+      // The scorer reads the manifest, not area.json directly. So tags
+      // must reach the manifest for keyword scoring to find them.
+      runKb('init');
+      runKb('init area widgets "Widgets" "Widget knowledge" --tags blue,calibration');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'manifest.json'), 'utf-8'),
+      ) as { areas: { id: string; tags?: string[] }[] };
+      const widgets = manifest.areas.find((a) => a.id === 'widgets');
+      expect(widgets?.tags).toEqual(['blue', 'calibration']);
+    });
+
+    it('init area --tags trims whitespace around comma-separated values', () => {
+      // Operator quality-of-life: '--tags a, b, c' should work the same
+      // as '--tags a,b,c'. Mirrors how 'kb add fact --tags' already
+      // behaves (cli.ts:103-104).
+      runKb('init');
+      runKb('init area widgets "Widgets" "Widget knowledge" --tags " blue ,  calibration "');
+      const areaJson = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'areas', 'widgets', 'area.json'), 'utf-8'),
+      ) as { tags: string[] };
+      expect(areaJson.tags).toEqual(['blue', 'calibration']);
+    });
+
+    it('init area without --tags writes an empty tags array', () => {
+      // Backward-compat: existing callers must keep working.
+      runKb('init');
+      runKb('init area widgets "Widgets" "Widget knowledge"');
+      const areaJson = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'areas', 'widgets', 'area.json'), 'utf-8'),
+      ) as { tags: string[] };
+      expect(areaJson.tags).toEqual([]);
+    });
   });
 
   describe('add', () => {

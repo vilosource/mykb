@@ -89,13 +89,22 @@ initCmd.action(() => {
 initCmd
   .command('area <id> <name> [summary]')
   .description('Create a new area')
-  .action((id: string, name: string, summary?: string) => {
+  .option('--tags <tags>', 'Comma-separated tags (used by the scorer for keyword overlap)')
+  .action((id: string, name: string, summary: string | undefined, opts: { tags?: string }) => {
     const bp = requireBrain();
-    createArea(bp, id, name, summary ?? '');
+    const tags = opts.tags
+      ? opts.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0)
+      : [];
+    createArea(bp, id, name, summary ?? '', tags);
     // Manifest is the scorer's source of truth — regen so the new area
-    // is visible to context-hook auto-injection. (Bug surfaced by
-    // experiments/area-scoring/: areas without a manifest entry never
-    // got scored, so their facts didn't auto-load.)
+    // (and its tags) are visible to context-hook auto-injection. (Bugs
+    // surfaced by experiments/area-scoring/: areas without a manifest
+    // entry never got scored, so their facts didn't auto-load; and tags
+    // not in the manifest schema couldn't drive keyword overlap even
+    // when the manifest was fresh.)
     regenerateManifest(bp);
     console.log(`Area '${id}' created`);
   });
