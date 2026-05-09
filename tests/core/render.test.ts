@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renderMarkdown,
   renderContextBlock,
+  renderJournalContextBlock,
   renderAreaIndex,
   renderJson,
   renderWorkspace,
@@ -85,6 +86,34 @@ describe('renderContextBlock', () => {
     const output = renderContextBlock(new Map());
     expect(output).toContain('<mykb-context>');
     expect(output).toContain('</mykb-context>');
+  });
+});
+
+describe('renderJournalContextBlock', () => {
+  const entries: JournalEntry[] = [
+    { date: '2026-05-08T10:00:00.000Z', text: 'older milestone' },
+    { date: '2026-05-09T11:30:00.000Z', text: 'newer milestone' },
+  ];
+
+  it('wraps journal entries in mykb-journal tags with workspace id and day count', () => {
+    const out = renderJournalContextBlock(entries, 'mykb', 2);
+    expect(out).toContain('<mykb-journal workspace="mykb" days="2">');
+    expect(out).toContain('</mykb-journal>');
+  });
+
+  it('renders entries in chronological order with date prefix', () => {
+    const out = renderJournalContextBlock(entries, 'mykb', 2);
+    expect(out).toContain('- 2026-05-08: older milestone');
+    expect(out).toContain('- 2026-05-09: newer milestone');
+    // Older before newer in the rendered output
+    const olderIdx = out.indexOf('older milestone');
+    const newerIdx = out.indexOf('newer milestone');
+    expect(olderIdx).toBeLessThan(newerIdx);
+  });
+
+  it('returns empty string when entries are empty', () => {
+    const out = renderJournalContextBlock([], 'mykb', 2);
+    expect(out).toBe('');
   });
 });
 

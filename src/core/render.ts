@@ -62,6 +62,21 @@ export function renderContextBlock(areaEntries: Map<string, KnowledgeEntry[]>): 
   return `<mykb-context>${inner}</mykb-context>\n`;
 }
 
+export function renderJournalContextBlock(
+  entries: JournalEntry[],
+  workspaceId: string,
+  days: number,
+): string {
+  if (entries.length === 0) return '';
+  const lines = [`<mykb-journal workspace="${workspaceId}" days="${days}">`];
+  for (const entry of entries) {
+    const dateStr = entry.date.split('T')[0];
+    lines.push(`- ${dateStr}: ${entry.text}`);
+  }
+  lines.push('</mykb-journal>');
+  return lines.join('\n') + '\n';
+}
+
 export function renderAreaIndex(areas: AreaMetadata[]): string {
   if (areas.length === 0) return '';
 

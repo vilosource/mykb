@@ -6,6 +6,8 @@ import { initBrain } from '../../src/core/init.js';
 import { MykbStore } from '../../src/core/knowledge-store.js';
 import { SessionState } from '../../src/extension/state.js';
 import { createContextHandler } from '../../src/extension/hooks/context.js';
+import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
+import type { JournalEntry } from '../../src/core/types.js';
 
 function makeManifest(brainPath: string, areas: Array<{ id: string; summary: string }>): void {
   fs.writeFileSync(
@@ -92,6 +94,169 @@ describe('Tier 2 — context handler', () => {
         const result = await handler(messages);
 
         expect(result).toEqual(messages);
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it('injects recent journal block when active workspace has entries within the window', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+
+      makeAreaDir(brainPath, 'mykb', 'mykb development', ['mykb']);
+      makeManifest(brainPath, [{ id: 'mykb', summary: 'mykb development' }]);
+
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+      wsStorage.createWorkspace('mykb', 'mykb');
+      wsStorage.setActiveWorkspaceId('mykb');
+
+      // Write journal entries directly with controlled dates: yesterday + today
+      const today = new Date().toISOString();
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const journalFile = path.join(brainPath, 'workspaces', 'mykb', 'journal.jsonl');
+      const entries: JournalEntry[] = [
+        { date: yesterday, text: 'wrote design docs' },
+        { date: today, text: 'started journal-auto-inject' },
+      ];
+      fs.writeFileSync(journalFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+      const store = MykbStore.open(brainPath);
+      try {
+        store.addFact('mykb', 'mykb is a knowledge base CLI', { tags: ['mykb'] });
+
+        const state = new SessionState();
+        state.addSignal('keyword', 'mykb development');
+
+        const handler = createContextHandler(store, state, brainPath);
+        const result = (await handler([{ role: 'user', content: 'test' }])) as Array<{
+          role: string;
+          content: string;
+        }>;
+
+        const injected = result.find((m) => m.role === 'system');
+        expect(injected).toBeDefined();
+        expect(injected!.content).toContain('<mykb-journal');
+        expect(injected!.content).toContain('workspace="mykb"');
+        expect(injected!.content).toContain('wrote design docs');
+        expect(injected!.content).toContain('started journal-auto-inject');
+        // Journal block appears before context block
+        const jIdx = injected!.content.indexOf('<mykb-journal');
+        const cIdx = injected!.content.indexOf('<mykb-context');
+        expect(jIdx).toBeGreaterThanOrEqual(0);
+        expect(cIdx).toBeGreaterThan(jIdx);
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it('does not inject journal block when there is no active workspace', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      makeAreaDir(brainPath, 'mykb', 'mykb development', ['mykb']);
+      makeManifest(brainPath, [{ id: 'mykb', summary: 'mykb development' }]);
+
+      const store = MykbStore.open(brainPath);
+      try {
+        const state = new SessionState();
+        state.addSignal('keyword', 'mykb development');
+
+        const handler = createContextHandler(store, state, brainPath);
+        const result = (await handler([{ role: 'user', content: 'test' }])) as Array<{
+          role: string;
+          content: string;
+        }>;
+
+        const injected = result.find((m) => m.role === 'system');
+        // Context may still inject; journal must not
+        if (injected) {
+          expect(injected.content).not.toContain('<mykb-journal');
+        }
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it('skips journal entries older than the window', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      makeAreaDir(brainPath, 'mykb', 'mykb development', ['mykb']);
+      makeManifest(brainPath, [{ id: 'mykb', summary: 'mykb development' }]);
+
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+      wsStorage.createWorkspace('mykb', 'mykb');
+      wsStorage.setActiveWorkspaceId('mykb');
+
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      const journalFile = path.join(brainPath, 'workspaces', 'mykb', 'journal.jsonl');
+      const entries: JournalEntry[] = [{ date: tenDaysAgo, text: 'ancient milestone' }];
+      fs.writeFileSync(journalFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+      const store = MykbStore.open(brainPath);
+      try {
+        const state = new SessionState();
+        state.addSignal('keyword', 'mykb development');
+
+        const handler = createContextHandler(store, state, brainPath);
+        const result = (await handler([{ role: 'user', content: 'test' }])) as Array<{
+          role: string;
+          content: string;
+        }>;
+
+        const injected = result.find((m) => m.role === 'system');
+        if (injected) {
+          expect(injected.content).not.toContain('ancient milestone');
+          expect(injected.content).not.toContain('<mykb-journal');
+        }
+      } finally {
+        store.close();
+      }
+    });
+  });
+
+  it('caps injected journal entries at the maximum (20)', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      makeAreaDir(brainPath, 'mykb', 'mykb development', ['mykb']);
+      makeManifest(brainPath, [{ id: 'mykb', summary: 'mykb development' }]);
+
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+      wsStorage.createWorkspace('mykb', 'mykb');
+      wsStorage.setActiveWorkspaceId('mykb');
+
+      // 30 entries all dated today — cap should keep the last 20 (newest by file order)
+      const now = Date.now();
+      const journalFile = path.join(brainPath, 'workspaces', 'mykb', 'journal.jsonl');
+      const entries: JournalEntry[] = [];
+      for (let i = 0; i < 30; i++) {
+        entries.push({
+          date: new Date(now - (29 - i) * 60 * 1000).toISOString(),
+          text: `entry-${i}`,
+        });
+      }
+      fs.writeFileSync(journalFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+      const store = MykbStore.open(brainPath);
+      try {
+        const state = new SessionState();
+        state.addSignal('keyword', 'mykb development');
+
+        const handler = createContextHandler(store, state, brainPath);
+        const result = (await handler([{ role: 'user', content: 'test' }])) as Array<{
+          role: string;
+          content: string;
+        }>;
+
+        const injected = result.find((m) => m.role === 'system');
+        expect(injected).toBeDefined();
+        expect(injected!.content).toContain('<mykb-journal');
+        // Newest 20 included; oldest 10 dropped
+        expect(injected!.content).toContain('entry-29');
+        expect(injected!.content).toContain('entry-10');
+        expect(injected!.content).not.toContain('entry-9');
+        expect(injected!.content).not.toContain('entry-0');
       } finally {
         store.close();
       }
