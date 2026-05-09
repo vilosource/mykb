@@ -148,6 +148,41 @@ describe('registerSessionHooks', () => {
     });
   });
 
+  // Regression for the bug surfaced by experiments/area-scoring/scenarios/
+  // kb-list-shows-tags.sh: session.ts:39 hardcoded `tags: []` when
+  // building AreaMetadata from manifest, so the area index in the
+  // system prompt never showed tags even after the manifest schema
+  // was extended. The fix is `tags: a.tags`. Without this Layer-1
+  // anchor, the L4 scenario was the only thing detecting it — a
+  // future refactor could re-introduce the bug silently.
+  it('before_agent_start renders area-index tags from manifest', async () => {
+    const { createArea } = await import('../../src/core/area.js');
+    const { regenerateManifest } = await import('../../src/core/manifest.js');
+
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      createArea(brainPath, 'widgets', 'Widgets', 'Widget knowledge', ['blue', 'calibration']);
+      regenerateManifest(brainPath);
+
+      const store = MykbStore.open(brainPath);
+      const state = new SessionState();
+      const pi = createMockPi();
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+
+      registerSessionHooks(pi, store, state, brainPath, wsStorage);
+
+      const handler = pi.handlers.get('before_agent_start')!;
+      const result = (await handler({ systemPrompt: 'base' }, {})) as BeforeAgentStartResult;
+
+      // The <mykb-areas> block must show the tags suffix appended by
+      // renderAreaIndex; that only happens if session.ts threads
+      // a.tags into AreaMetadata (not hardcoded []).
+      expect(result.systemPrompt).toContain('[tags: blue, calibration]');
+
+      store.close();
+    });
+  });
+
   it('session_shutdown with active workspace updates timestamp', async () => {
     await withTempBrain(async (brainPath) => {
       initBrain(brainPath);

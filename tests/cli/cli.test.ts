@@ -424,11 +424,37 @@ describe('kb CLI', () => {
       expect(stdout).toContain('updated');
     });
 
+    it('area update propagates the new summary to manifest.json', () => {
+      // Manifest is the scorer's source of truth — a stale summary
+      // means the LLM scores this area against outdated keywords.
+      // cli.ts:409 calls regenerateManifest after updateAreaMetadata;
+      // this test would fail (silently, except via the L4 matrix) if
+      // a future edit removed that call.
+      runKb('area update test-area --summary "Updated summary"');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'manifest.json'), 'utf-8'),
+      ) as { areas: { id: string; summary: string }[] };
+      const area = manifest.areas.find((a) => a.id === 'test-area');
+      expect(area?.summary).toBe('Updated summary');
+    });
+
     it('deletes an area', () => {
       const { stdout, exitCode } = runKb('area delete test-area');
       expect(exitCode).toBe(0);
       expect(stdout).toContain('deleted');
       expect(fs.existsSync(path.join(brainPath, 'areas', 'test-area'))).toBe(false);
+    });
+
+    it('area delete removes the area from manifest.json', () => {
+      // If manifest still lists a deleted area, the scorer continues
+      // to consider it for keyword overlap and the kb_list / area-index
+      // surfaces still mention it. cli.ts:418 calls regenerateManifest
+      // after deleteArea; this test guards that.
+      runKb('area delete test-area');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'manifest.json'), 'utf-8'),
+      ) as { areas: { id: string }[] };
+      expect(manifest.areas.find((a) => a.id === 'test-area')).toBeUndefined();
     });
   });
 
