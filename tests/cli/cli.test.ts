@@ -70,6 +70,25 @@ describe('kb CLI', () => {
       expect(stdout).toContain('networking');
       expect(fs.existsSync(path.join(brainPath, 'areas', 'networking', 'area.json'))).toBe(true);
     });
+
+    it('init area updates manifest.json so the scorer sees the new area', () => {
+      // Regression for the bug surfaced by experiments/area-scoring/: areas
+      // created via `kb init area` were invisible to the context-hook scorer
+      // because manifest.json wasn't regenerated. The Pi extension reads
+      // manifest at every turn and falls back to listAreas only when the
+      // manifest is empty — so a stale manifest silently broke scoring for
+      // every newly-created area.
+      runKb('init');
+      runKb('init area networking "Networking" "Network knowledge"');
+      const manifestPath = path.join(brainPath, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
+        areas: { id: string; summary: string }[];
+      };
+      const ids = manifest.areas.map((a) => a.id);
+      expect(ids).toContain('networking');
+      const networking = manifest.areas.find((a) => a.id === 'networking');
+      expect(networking?.summary).toBe('Network knowledge');
+    });
   });
 
   describe('add', () => {

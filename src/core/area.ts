@@ -15,6 +15,7 @@ export function createArea(
   id: string,
   name: string,
   summary: string,
+  tags: string[] = [],
 ): AreaMetadata {
   const dir = areaDir(brainPath, id);
   fs.mkdirSync(dir, { recursive: true });
@@ -25,7 +26,7 @@ export function createArea(
     name,
     summary,
     owner: '',
-    tags: [],
+    tags,
     created: now,
     updated: now,
   };

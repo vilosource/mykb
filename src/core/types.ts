@@ -90,6 +90,7 @@ export type ManifestArea = {
   summary: string;
   owner: string;
   updated: string;
+  tags: string[];
 };
 
 export type ManifestFile = {
