@@ -93,22 +93,22 @@ Must verify:
 npx vitest run tests/cli/session-isolation.test.ts
 ```
 
-### Layer 4: Behavioral Validation
+### Layer 4: Behavioral Validation (kb-spike experiments)
 
-**Location:** `tests/behavioral/` (when created)
+**Location:** `experiments/<feature>/` (per-feature spec + scenario scripts), driven by `scripts/spike/kb-spike`.
+**Methodology:** see `docs/experimentation-METHODOLOGY.md` for the full spec.
 
-For features where mykb's output is consumed by an LLM (context delivery, rendered markdown, area index), quality matters beyond structural correctness.
+For features whose behavior emerges only when Pi runs against a real brain — hooks, context injection, scorer changes, journal-auto-inject, signal capture, anything where unit tests prove "the function returns the right value" but the user-visible question is "does the LLM act correctly when this fires." Each such feature gets a versioned experiment in `experiments/<feature>/` with:
 
-**String matching** — when checking for specific content presence:
-```typescript
-expect(rendered).toContain('## Knowledge');
-expect(rendered).not.toContain('undefined');
-```
+- An `EXPERIMENT.md` that includes a **behavior matrix** (stimulus → expected behavior → scenario) — the spec.
+- One bash scenario per row of the matrix, each shaped as **prepare → stimulate → observe**.
+- Paired positive/negative scenarios for any behavior-counting feature (fires when it should + does NOT fire when it shouldn't).
 
-**LLM-as-judge** — when evaluating readability, completeness, or usefulness:
-- Feed the rendered output to an LLM with evaluation criteria
-- Judge returns pass/fail with reason
-- Use for: Tier 1 area index quality, context injection completeness, rendered workspace state clarity
+Run via `bash scripts/spike/kb-spike run-scenario <exp-id> <scenario>`. The harness clones the brain into an isolated instance, snapshots the bundle being tested, runs Pi against the instance, and asserts on whatever surface the feature affects (LLM output, state diffs, counters, event logs).
+
+The kb-spike harness itself is *not* part of `kb` — it's a separate operator tool in `scripts/spike/` so testing kb does not require kb to work.
+
+**Lightweight behavioral assertions** (string matching, LLM-as-judge) inside unit/integration tests are still valid for renderer-level checks. They live alongside the unit test, not under `experiments/`. Use them when the assertion is on the *rendered string*, not on the *running LLM's behavior*.
 
 ---
 
@@ -116,14 +116,15 @@ expect(rendered).not.toContain('undefined');
 
 Different changes demand different test layers. Use this table to determine which tests are mandatory.
 
-| Change type | Layer 1 (Unit) | Layer 2 (CLI) | Layer 3 (E2E Isolation) | Layer 4 (Behavioral) |
+| Change type | Layer 1 (Unit) | Layer 2 (CLI) | Layer 3 (E2E Isolation) | Layer 4 (kb-spike experiment) |
 |---|---|---|---|---|
 | Pure logic (scorer, parser, renderer) | Required | — | — | If LLM-facing output |
 | New CLI command or flag | Required | Required | — | — |
 | Shared mutable state (files read/written by multiple processes) | Required | Required | **Required** | — |
 | Data format change (JSONL schema, workspace.json) | Required | Required | — | — |
 | LLM-facing output (context delivery, area index, rendered markdown) | Required | — | — | **Required** |
-| Bug fix | Required (reproduce first) | If CLI-visible | If concurrency-related | — |
+| **Hook behavior** (signal capture, context injection, side-effect counters, anything observable only in the full Pi+brain loop) | Required | — | — | **Required** (paired pos/neg scenarios) |
+| Bug fix | Required (reproduce first) | If CLI-visible | If concurrency-related | If the bug was Layer-4-observable |
 | Cross-repo feature | Required per repo | Required per repo | **Required** (end-to-end) | — |
 
 **The rule:** If your change touches shared mutable state — any file, database, or resource that multiple processes may access simultaneously — you must write an E2E isolation test proving concurrent access is safe. Unit tests with mocked filesystems are not sufficient.
@@ -140,7 +141,8 @@ Before a feature is considered done, every applicable item must be checked.
 - [ ] Unit test for each error case
 - [ ] If the feature adds/changes a CLI command → CLI integration test (exit code, output, side effects)
 - [ ] If the feature touches shared mutable state → E2E isolation test with concurrent actors
-- [ ] If the feature changes LLM-facing output → behavioral validation (string matching or LLM-as-judge)
+- [ ] If the feature changes LLM-facing output → behavioral validation (string matching or LLM-as-judge in unit tests)
+- [ ] If the feature is Layer-4-required (hooks, context injection, scorer changes, anything observable only in the full Pi+brain loop) → `experiments/<feature>/` exists with `EXPERIMENT.md` (behavior matrix) and at least one scenario per matrix row, and `bash scripts/spike/kb-spike run-scenario <exp-id> <scenario>` passes for every scenario. See `docs/experimentation-METHODOLOGY.md`.
 - [ ] If the feature spans multiple repos → integration test in each repo, plus a cross-boundary test
 - [ ] If the feature uses env vars → tests save/restore `process.env` to prevent cross-test pollution
 - [ ] Full test suite passes: `npm test`

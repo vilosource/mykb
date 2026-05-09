@@ -11,10 +11,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Feature completion checklist
 - Anti-patterns to avoid
 
+**Read `docs/experimentation-METHODOLOGY.md` before implementing any Layer-4 feature.** Layer-4 features (hooks, context injection, scorer changes, signal capture, side-effect counters — anything observable only in the full Pi+brain loop) require a versioned experiment in `experiments/<feature>/` with a behavior matrix and prepare/stimulate/observe scenarios. The kb-spike harness at `scripts/spike/` runs scenarios against an isolated brain instance cloned from `~/.mykb`. The methodology doc is mandatory; the manifesto's Layer 4 points at it.
+
 Key rules that are easy to miss:
 - **Shared mutable state requires E2E isolation tests.** If your change touches files or resources accessed by multiple processes (e.g., `.active` file, session files, workspace state), unit tests are not sufficient. Write concurrent-access E2E tests through the real CLI.
-- **LLM-facing output requires behavioral validation.** Context delivery, area index, rendered markdown — test the quality, not just the structure.
+- **LLM-facing output requires behavioral validation.** Context delivery, area index, rendered markdown — test the quality, not just the structure. For hook-level behaviors, that means a kb-spike experiment, not a unit-test string match.
 - **Combined RED+GREEN commits are OK for small changes** (<50 lines implementation), but never across features.
+- **The kb-spike harness control plane never calls `kb` directly.** Only scenarios call kb, and they call the per-experiment captured build (`<instance>/.e2e-build/cli.js`), not the host's `kb`. This keeps the harness usable when kb itself is broken on the working tree.
 
 ## Build and Test
 

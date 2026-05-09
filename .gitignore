@@ -4,3 +4,6 @@ dist/
 coverage/
 .env
 spikes/active-spike
+
+# experimentation harness — local run history (specs and scenarios are tracked)
+experiments/*/runs/
