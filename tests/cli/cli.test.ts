@@ -47,6 +47,25 @@ describe('kb CLI', () => {
     });
   });
 
+  describe('version', () => {
+    // Regression for the bug where commander silently disabled
+    // --version because readVersionFromDisk found dist/package.json
+    // (Pi-extension manifest, no version field) first and returned
+    // undefined. Both --version and -V should return the package
+    // version string and exit 0.
+    it('prints version with --version', () => {
+      const { stdout, exitCode } = runKb('--version');
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    });
+
+    it('prints version with -V', () => {
+      const { stdout, exitCode } = runKb('-V');
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    });
+  });
+
   describe('init', () => {
     it('creates a brain directory', () => {
       const { stdout, exitCode } = runKb('init');
