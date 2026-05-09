@@ -120,12 +120,13 @@ teardown() {
   grep -qF "$INSTANCE:/home/node/.mykb" "$yaml"
   # Captured CLI mount (so hooks/Claude can shell out to `kb`).
   grep -qF "$INSTANCE/.e2e-build/cli:/opt/mykb-cli" "$yaml"
-  # workdir.type:persistent with source pointing at the seed dir
-  # — mounted as /workspace via vfa's workdir manager (not via
-  # extra_volumes, which conflicts with ephemeral).
+  # workdir.type:persistent with source pointing at the seed dir.
+  # mount_path MUST be /workdir (vfa's claude adapter hardcodes that
+  # path; if profile says /workspace, exec cwd diverges from the
+  # mount and project-level settings/hooks aren't found).
   grep -q "type: persistent" "$yaml"
   grep -qF "source: $INSTANCE/.e2e-workdir" "$yaml"
-  grep -q "mount_path: /workspace" "$yaml"
+  grep -q "mount_path: /workdir" "$yaml"
   # No Pi plugins block.
   ! grep -q "plugins:" "$yaml"
 }

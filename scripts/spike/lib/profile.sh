@@ -116,6 +116,15 @@ EOF
       # in the project root claude-code expects). Mounting via
       # extra_volumes alongside an ephemeral workdir created two binds
       # to /workspace and the ephemeral won — hooks were never read.
+      # mount_path MUST match what vfa's claude adapter mounts the
+      # workdir at internally — `/workdir` (see vf-agents/internal/
+      # adapter/claude.go BuildVolumes). Setting it to anything else
+      # creates a mismatch: the seed dir is mounted at /workdir but
+      # `docker exec`'s cwd comes from mount_path, so claude looks for
+      # .claude/settings.json in the wrong place and project-level
+      # hooks silently don't load. Discovered while plumbing
+      # claude-code support; one of two fixes (the other is the
+      # `--setting-sources user,project,local` flag in vfa's adapter).
       cat > "$yaml" <<EOF
 id: e2e-${exp_id}
 description: "kb-spike experiment instance: ${exp_id} (claude-code)"
@@ -123,7 +132,7 @@ compatible_runtimes: [claude-code]
 workdir:
   type: persistent
   source: ${workdir}
-  mount_path: /workspace
+  mount_path: /workdir
 mode: headless
 output_format: json
 timeout: ${timeout}

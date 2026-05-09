@@ -37,16 +37,12 @@ This experiment proves:
 
 ### What doesn't yet work (⏳)
 
-- **`hook-injects-handoff` does NOT pass.** The SessionStart hook script never fires inside the claude-code container, even though:
-  - The hook script + settings.json are present in the workdir-seed and confirmed mounted at the right path (`/workdir/.claude/...` — vfa's claude adapter hardcodes `/workdir`, not `/workspace`).
-  - Hook command path uses `$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh` (the documented mechanism for relative-to-project paths).
-  - vfa already passes `--dangerously-skip-permissions` so it's not an approval gate.
-  - The hook script writes a breadcrumb `hook-ran.txt` on entry — the file never appears, indicating the hook genuinely doesn't run.
+- **`hook-injects-handoff` does NOT pass.** Definitively diagnosed end of this session. The chain to making the hook fire required several discoveries:
+  1. `claude -p` does NOT load project-level `.claude/settings.json` by default — needs `--setting-sources user,project,local` explicitly. **Patched vfa's claude adapter** in `internal/adapter/claude.go` to pass it; rebuilt + reinstalled.
+  2. vfa's claude adapter mounts the workdir at `/workdir`, not the profile's declared `mount_path`. **Aligned `mount_path: /workdir` in the profile** so docker exec's cwd matches where the workdir is bound — otherwise claude looks for `.claude/settings.json` in an empty path.
+  3. After (1) and (2): the hook **does fire** (verified via breadcrumb file + `--include-hook-events` stream output), and emits well-formed JSON with `additionalContext` containing the marker. **But the LLM never sees that context.**
+  4. **Root cause:** `additionalContext` from `SessionStart` hooks **is not injected into the LLM in `-p` mode**. Confirmed via Claude Code documentation lookup: this field is for interactive sessions only. Print mode strips the interactive context-injection pipeline; the hook's output is processed but never reaches the model.
 
-  Investigation took us as far as: claude-code's `-p` (headless / print) mode is documented to honor `SessionStart` hooks, but in practice with a freshly-built `vf-agents-claude:1.0.33-r1` image our SessionStart hook never executes. Possible causes (next-session investigation):
-  1. The claude-code version in the container doesn't load project-level settings in `-p` mode despite docs.
-  2. `--debug hooks` flag would tell us what's happening; vfa's adapter doesn't expose a way to add it. Patching vfa to pass it (or running claude manually inside an interactive container) is the next debug step.
-  3. User-level settings (`/home/node/.claude/settings.json`) may load when project-level doesn't — would need to mount the hook config there instead.
-  4. Alternative injection mechanisms (`--append-system-prompt-file`, prompt prefixing in the harness) bypass hooks entirely and may be more reliable for headless mode.
+  **The documented path forward for headless context injection is `--append-system-prompt-file`.** That requires another vfa adapter change — accept a per-experiment path and pass it through. Out of scope for this commit; logged as the v2 follow-up.
 
-  **The infrastructure is in place** — when the hook loading is figured out (or an alternative injection path is wired into `step.sh`), the L4 scenario as written should pass without further changes.
+  **The infrastructure that IS in place** — the `--runtime claude-code` flag, profile generation, workdir-seed mechanism, hook scripts (which fire correctly), and vfa adapter patches for `--setting-sources` + cwd alignment — all become useful once the file-based injection path is added. No throwaway work.

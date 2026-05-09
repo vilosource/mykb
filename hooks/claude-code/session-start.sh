@@ -17,16 +17,19 @@
 
 set -euo pipefail
 
-# Diagnostic breadcrumb — write a file inside /workspace/.claude/ so
-# the operator can verify the hook actually fired (the hook output
-# disappears into Claude's internal context). Persistent workdir means
-# this survives the container.
-mkdir -p /workspace/.claude
+# Diagnostic breadcrumb — write a file inside the project's .claude/
+# so the operator can verify the hook actually fired (the hook output
+# disappears into Claude's internal context). $CLAUDE_PROJECT_DIR is
+# set by Claude Code to the project root (e.g. /workdir under vfa).
+# Persistent workdir means this survives the container.
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-/workdir}"
+mkdir -p "$PROJECT_DIR/.claude"
 {
   echo "session-start.sh fired at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "MYKB_DIR=${MYKB_DIR:-unset}"
+  echo "CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-unset}"
   echo "PWD=$PWD"
-} > /workspace/.claude/hook-ran.txt 2>&1
+} > "$PROJECT_DIR/.claude/hook-ran.txt" 2>&1
 
 # Discard the stdin JSON event payload — we don't need it for this
 # hook, but consuming it is good practice (some shells inherit the
