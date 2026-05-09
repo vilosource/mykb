@@ -922,29 +922,40 @@ if should_run "$TEST"; then
   assert_file_contains "$TEST" "${BRAIN_DIR}/workspaces/special-chars/journal.jsonl" "JIRA-456"
 fi
 
-# --- Test 10.5: Only last 3 journal entries injected at start ---
-TEST="10.5 Journal injection limited to last 3 entries"
+# --- Test 10.5: Journal injection windowed to last 2 days ---
+TEST="10.5 Journal injection windowed to last 2 days, capped at 20"
 if should_run "$TEST"; then
   log_test "$TEST"
   reset_brain
   $KB work create limit-journal "Limit Journal" >/dev/null
   $KB work start limit-journal >/dev/null
-  $KB work journal "ENTRY_ALPHA: first entry ever" >/dev/null
-  $KB work journal "ENTRY_BRAVO: second entry" >/dev/null
-  $KB work journal "ENTRY_CHARLIE: third entry" >/dev/null
-  $KB work journal "ENTRY_DELTA: fourth entry" >/dev/null
-  $KB work journal "ENTRY_ECHO: fifth and latest" >/dev/null
+
+  # Inject one ancient entry (5 days ago) by writing journal.jsonl directly
+  # — kb work journal stamps Date.now(), which would all be "today".
+  ancient_date=$(python3 -c "
+from datetime import datetime, timezone, timedelta
+print((datetime.now(timezone.utc) - timedelta(days=5)).isoformat().replace('+00:00','Z'))
+")
+  printf '{"date":"%s","text":"ENTRY_ANCIENT: from five days ago"}\n' "$ancient_date" \
+    > "${BRAIN_DIR}/workspaces/limit-journal/journal.jsonl"
+
+  # Append four recent entries via the CLI (today)
+  $KB work journal "ENTRY_BRAVO: yesterday's work" >/dev/null
+  $KB work journal "ENTRY_CHARLIE: this morning" >/dev/null
+  $KB work journal "ENTRY_DELTA: just now" >/dev/null
+  $KB work journal "ENTRY_ECHO: latest entry" >/dev/null
   $KB save >/dev/null 2>&1
 
   json=$(run_prompt "List all the journal entries you can see right now. Only list what is visible to you.")
   result=$(extract_result "$json")
 
-  # Last 3 should be visible (CHARLIE, DELTA, ECHO)
+  # Recent entries (within 2-day window) should be visible
   assert_contains "$TEST" "$result" "ECHO"
   assert_contains "$TEST" "$result" "DELTA"
   assert_contains "$TEST" "$result" "CHARLIE"
-  # First entry should NOT be in the injected context
-  assert_not_contains "$TEST" "$result" "ALPHA"
+  assert_contains "$TEST" "$result" "BRAVO"
+  # Ancient entry (5 days old) should NOT be in the injected context
+  assert_not_contains "$TEST" "$result" "ANCIENT"
 fi
 
 
