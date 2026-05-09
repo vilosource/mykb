@@ -112,6 +112,35 @@ teardown() {
   [ "$(jq -r .result "$jf")" = "echo: what is 2+2?" ]
 }
 
+@test "step passes --env MYKB_DISABLE_TOOLS=1 when SPIKE_DISABLE_TOOLS=1" {
+  # Replace the vfa stub with one that records its argv so we can
+  # check that --env was forwarded.
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+# Print argv to stderr so the test can read it; emit a minimal JSON
+# result on stdout so step()'s redirect doesn't break.
+printf 'ARGV: %q ' "$@" >&2
+echo '{"result":"ok","status":"completed"}'
+EOF
+  chmod +x "$STUB_DIR/vfa"
+
+  SPIKE_DISABLE_TOOLS=1 step "probe" --prompt "x" 2>"$TMP/vfa-stderr"
+  grep -q "MYKB_DISABLE_TOOLS=1" "$TMP/vfa-stderr"
+}
+
+@test "step does not pass --env when SPIKE_DISABLE_TOOLS is unset" {
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+printf 'ARGV: %q ' "$@" >&2
+echo '{"result":"ok","status":"completed"}'
+EOF
+  chmod +x "$STUB_DIR/vfa"
+
+  unset SPIKE_DISABLE_TOOLS
+  step "probe" --prompt "x" 2>"$TMP/vfa-stderr"
+  ! grep -q "MYKB_DISABLE_TOOLS" "$TMP/vfa-stderr"
+}
+
 @test "step creates a git commit on the current branch" {
   before="$(cd "$INSTANCE" && git rev-parse HEAD)"
   step "x" --prompt "hi"

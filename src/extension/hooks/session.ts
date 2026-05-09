@@ -36,7 +36,7 @@ export function createBeforeAgentStartHandler(
         name: a.id,
         summary: a.summary,
         owner: a.owner,
-        tags: [],
+        tags: a.tags,
         created: '',
         updated: a.updated,
       }));

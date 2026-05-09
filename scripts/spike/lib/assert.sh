@@ -197,6 +197,45 @@ assert_jsonl_count() {
   fi
 }
 
+# ── Tool-call detection (via vfa logs --raw) ─────────────────────
+
+# Asserts the most recent step did NOT invoke any vfa tool whose name
+# matches a given prefix. Default prefix is 'kb_' — used by scoring-
+# isolation scenarios that need to prove the LLM answered without
+# kb_search/kb_list/kb_load. Pi's runtime tools (bash, Read, Write)
+# are out of scope: the disable knob suppresses kb tools only, and
+# those runtime tools may fire even on a successful scoring path.
+#
+# Detection is via vfa's run history: every successful run is recorded
+# under ~/.vf-agents/runs/<run_id>/, and `vfa logs --raw <run_id>` emits
+# the JSONL event stream — which includes tool_execution_start events
+# with a `toolName` field when tools fire.
+assert_no_tool_calls() {
+  local prefix="${1:-kb_}"
+  if [[ -z "${SPIKE_LAST_STEP_FILE:-}" || ! -f "$SPIKE_LAST_STEP_FILE" ]]; then
+    _spike_assert_fail "assert_no_tool_calls: SPIKE_LAST_STEP_FILE missing or unset"
+    return 0
+  fi
+  local run_id
+  run_id="$(jq -r '.run_id // empty' "$SPIKE_LAST_STEP_FILE")"
+  if [[ -z "$run_id" ]]; then
+    _spike_assert_fail "assert_no_tool_calls: step file has no run_id field"
+    return 0
+  fi
+
+  local logs
+  logs="$(vfa logs --raw "$run_id" 2>/dev/null || true)"
+  local matching
+  matching="$(grep '"type":"tool_execution_start"' <<<"$logs" 2>/dev/null \
+              | jq -r --arg p "$prefix" 'select((.toolName // .tool // "") | startswith($p)) | .toolName // .tool // "?"' 2>/dev/null \
+              | sort -u | tr '\n' ',' | sed 's/,$//')"
+  if [[ -n "$matching" ]]; then
+    _spike_assert_fail "assert_no_tool_calls(prefix=${prefix}): tools fired: ${matching}"
+  else
+    _spike_assert_pass
+  fi
+}
+
 # ── Counter (counters.json convention) ───────────────────────────
 
 assert_counter() {

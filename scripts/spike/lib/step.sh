@@ -66,6 +66,16 @@ step() {
   local step_file
   step_file="$(printf '%s/%03d-%s.json' "$steps_dir" "$SPIKE_STEP_NUM" "$name")"
 
+  # Build the vfa argv. SPIKE_DISABLE_TOOLS=1 (set by scoring-isolation
+  # scenarios) translates to '--env MYKB_DISABLE_TOOLS=1', which the
+  # bundled extension reads to skip registerTools — proving the LLM
+  # answered from scoring/system-prompt context, not via a tool call.
+  local -a vfa_args=(run --provider pi --profile "e2e-${SPIKE_EXP_ID}")
+  if [[ "${SPIKE_DISABLE_TOOLS:-}" == "1" ]]; then
+    vfa_args+=(--env "MYKB_DISABLE_TOOLS=1")
+  fi
+  vfa_args+=(--prompt "$prompt")
+
   # Run vfa. Capture stdout (JSON) to the step file; stderr goes to the
   # operator. Use `|| rc=$?` instead of relying on $? — the orchestrator
   # runs with `set -e`, so a non-zero vfa exit would otherwise kill the
@@ -73,7 +83,7 @@ step() {
   # failures to surface as a failed step (via assertions), not as a
   # crashed harness.
   local rc=0
-  vfa run --provider pi --profile "e2e-${SPIKE_EXP_ID}" --prompt "$prompt" > "$step_file" || rc=$?
+  vfa "${vfa_args[@]}" > "$step_file" || rc=$?
 
   export SPIKE_LAST_STEP_FILE="$step_file"
 

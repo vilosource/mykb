@@ -185,6 +185,126 @@ teardown() {
   [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
 }
 
+# ── Tool-call detection (vfa logs --raw) ─────────────────────────
+
+@test "assert_no_tool_calls passes when run had no tool_execution_start events" {
+  # Stub vfa for the assertion to call; it'll just print events that
+  # contain no tool_execution_start lines.
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+# Echo a tool-free event log when called as `vfa logs --raw <id>`.
+case "${1:-}" in
+  logs)
+    cat <<LOG
+{"type":"session"}
+{"type":"agent_start"}
+{"type":"turn_end"}
+LOG
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  # Step file with a run_id field — that's what the assertion uses to
+  # reach into vfa's run history.
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_no_tool_calls
+  [ "$SPIKE_ASSERT_PASS" -eq 1 ]
+  [ "$SPIKE_ASSERT_FAIL" -eq 0 ]
+
+  rm -rf "$STUB_DIR"
+}
+
+@test "assert_no_tool_calls records failure when kb_* tool fires" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    cat <<LOG
+{"type":"session"}
+{"type":"tool_execution_start","toolName":"kb_search"}
+{"type":"tool_execution_end"}
+LOG
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_no_tool_calls
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+  [[ "$SPIKE_ASSERT_FAILURES" == *"kb_search"* ]]
+
+  rm -rf "$STUB_DIR"
+}
+
+@test "assert_no_tool_calls ignores Pi runtime tools (bash, Read) by default" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    cat <<LOG
+{"type":"session"}
+{"type":"tool_execution_start","toolName":"bash"}
+{"type":"tool_execution_start","toolName":"Read"}
+{"type":"tool_execution_end"}
+LOG
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_no_tool_calls
+  [ "$SPIKE_ASSERT_PASS" -eq 1 ]
+  [ "$SPIKE_ASSERT_FAIL" -eq 0 ]
+
+  rm -rf "$STUB_DIR"
+}
+
+@test "assert_no_tool_calls accepts a custom prefix arg" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    echo '{"type":"tool_execution_start","toolName":"bash"}'
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_no_tool_calls "ba"
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+  [[ "$SPIKE_ASSERT_FAILURES" == *"bash"* ]]
+
+  rm -rf "$STUB_DIR"
+}
+
+@test "assert_no_tool_calls fails when SPIKE_LAST_STEP_FILE missing" {
+  unset SPIKE_LAST_STEP_FILE
+  assert_no_tool_calls
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
+@test "assert_no_tool_calls fails when step file has no run_id" {
+  printf '{"status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+  assert_no_tool_calls
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
 # ── Counter (counters.json convention) ───────────────────────────
 
 @test "assert_counter passes for matching counter value" {
