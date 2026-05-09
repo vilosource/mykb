@@ -30,7 +30,10 @@ prepare() {
 }
 
 stimulate() {
-  step "ask-resume" --prompt "I'm picking up where I left off. What were we doing, and what's the next concrete step?"
+  # The "Quote the handoff verbatim" instruction is what pins the
+  # assertion-on-marker test. A vaguer prompt lets the LLM paraphrase
+  # and the marker check becomes flaky.
+  step "ask-resume" --prompt "I'm picking up where I left off. Quote the workspace handoff verbatim (including any reference IDs), then state the single next concrete step."
 }
 
 observe() {

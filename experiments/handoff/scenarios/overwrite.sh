@@ -28,7 +28,7 @@ prepare() {
 }
 
 stimulate() {
-  step "ask-handoff" --prompt "What does my session handoff say I should do next? Quote any unique markers you find verbatim."
+  step "ask-handoff" --prompt "Quote my workspace handoff verbatim (including any reference IDs), then state the single next concrete step."
 }
 
 observe() {

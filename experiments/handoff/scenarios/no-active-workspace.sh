@@ -26,7 +26,11 @@ prepare() {
 }
 
 stimulate() {
-  step "ask-resume" --prompt "Am I in the middle of any work? Quote any unique markers you find verbatim."
+  # Tight prompt: constrain to a one-line answer so the LLM doesn't
+  # spiral into a long enumeration when the answer is empty. (A longer
+  # "quote everything you see" prompt produced runaway streaming on
+  # this state — useful finding, not what we're testing here.)
+  step "ask-resume" --prompt "Reply in one short sentence: is there an active workspace I'm continuing? If yes, say its name."
 }
 
 observe() {

@@ -22,7 +22,7 @@ prepare() {
 }
 
 stimulate() {
-  step "ask-handoff" --prompt "Do I have a session handoff? If so, quote any unique markers verbatim."
+  step "ask-handoff" --prompt "Reply in one short sentence: do I have a workspace handoff right now? If yes, quote its first 20 characters verbatim."
 }
 
 observe() {
