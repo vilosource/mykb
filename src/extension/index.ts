@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI): void {
   registerSessionHooks(pi, store, state, brainPath, wsStorage);
 
   // Tier 2 — Context injection on each turn
-  pi.on('context', createContextHandler(store, state, brainPath, wsStorage));
+  pi.on('context', createContextHandler(store, state, brainPath));
 
   // Tool gating — block direct edits to knowledge files
   const gatingHandler = createToolGatingHandler(brainPath);
