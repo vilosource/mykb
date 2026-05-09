@@ -94,6 +94,67 @@ teardown() {
   grep -q "timeout: 240" "$yaml"
 }
 
+# Claude-code runtime: the kb extension surface (Pi-specific events) is
+# replaced by .claude/settings.json hooks that wrap the kb CLI. The
+# profile mounts a workdir-seed dir (.claude/) and the captured CLI
+# instead of the Pi extension bundle.
+@test "spike_write_profile claude-code emits compatible_runtimes: [claude-code]" {
+  # Build the workdir-seed and CLI paths the profile is expected to mount.
+  mkdir -p "$INSTANCE/.e2e-build/cli" "$INSTANCE/.e2e-workdir/.claude"
+  echo "// stub" > "$INSTANCE/.e2e-build/cli/cli.js"
+
+  SPIKE_RUNTIME=claude-code spike_write_profile "ce-1" "$INSTANCE"
+  yaml="$VFA_HOME/profiles/e2e-ce-1.yaml"
+  [ -f "$yaml" ]
+  grep -q "compatible_runtimes:.*claude-code" "$yaml"
+  ! grep -q "compatible_runtimes:.*pi" "$yaml"
+}
+
+@test "spike_write_profile claude-code mounts captured CLI and workdir-seed" {
+  mkdir -p "$INSTANCE/.e2e-build/cli" "$INSTANCE/.e2e-workdir/.claude"
+  echo "// stub" > "$INSTANCE/.e2e-build/cli/cli.js"
+
+  SPIKE_RUNTIME=claude-code spike_write_profile "ce-2" "$INSTANCE"
+  yaml="$VFA_HOME/profiles/e2e-ce-2.yaml"
+  # Brain mount (same as pi).
+  grep -qF "$INSTANCE:/home/node/.mykb" "$yaml"
+  # Captured CLI mount (so hooks/Claude can shell out to `kb`).
+  grep -qF "$INSTANCE/.e2e-build/cli:/opt/mykb-cli" "$yaml"
+  # workdir.type:persistent with source pointing at the seed dir
+  # — mounted as /workspace via vfa's workdir manager (not via
+  # extra_volumes, which conflicts with ephemeral).
+  grep -q "type: persistent" "$yaml"
+  grep -qF "source: $INSTANCE/.e2e-workdir" "$yaml"
+  grep -q "mount_path: /workspace" "$yaml"
+  # No Pi plugins block.
+  ! grep -q "plugins:" "$yaml"
+}
+
+@test "spike_write_profile claude-code refuses when workdir-seed missing" {
+  mkdir -p "$INSTANCE/.e2e-build/cli"
+  echo "// stub" > "$INSTANCE/.e2e-build/cli/cli.js"
+  # No .e2e-workdir/
+
+  run env SPIKE_RUNTIME=claude-code bash -c \
+    "source $REPO_ROOT/scripts/spike/lib/profile.sh && \
+     export VFA_HOME=$VFA_HOME && \
+     spike_write_profile ce-fail '$INSTANCE'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"workdir"* ]] || [[ "$output" == *".e2e-workdir"* ]]
+}
+
+@test "spike_write_profile claude-code refuses when captured CLI missing" {
+  mkdir -p "$INSTANCE/.e2e-workdir/.claude"
+  # No cli.
+
+  run env SPIKE_RUNTIME=claude-code bash -c \
+    "source $REPO_ROOT/scripts/spike/lib/profile.sh && \
+     export VFA_HOME=$VFA_HOME && \
+     spike_write_profile ce-fail2 '$INSTANCE'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cli"* ]]
+}
+
 @test "spike_write_profile errors with usage when missing args" {
   run spike_write_profile
   [ "$status" -ne 0 ]

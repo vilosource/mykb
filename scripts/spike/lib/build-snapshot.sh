@@ -92,6 +92,43 @@ spike_capture_build() {
     > "$out/build-meta.json"
 }
 
+# Seed the per-experiment workdir for claude-code runtime experiments.
+# Copies the repo's hooks/claude-code/ tree into <instance>/.e2e-workdir/
+# laid out as a project root with .claude/settings.json + .claude/hooks/.
+# The kb-spike profile mounts this dir as /workspace inside the
+# Claude Code container, so the hooks fire with the right paths.
+spike_seed_workdir() {
+  if [[ $# -ne 2 ]]; then
+    echo "spike_seed_workdir: usage: spike_seed_workdir <repo_root> <instance>" >&2
+    return 2
+  fi
+  local repo="$1" instance="$2"
+
+  if [[ ! -d "$instance" ]]; then
+    echo "spike_seed_workdir: instance does not exist: $instance" >&2
+    return 1
+  fi
+  local hooks_src="$repo/hooks/claude-code"
+  if [[ ! -d "$hooks_src" ]]; then
+    echo "spike_seed_workdir: hooks dir missing at $hooks_src" >&2
+    return 1
+  fi
+  if [[ ! -f "$hooks_src/session-start.sh" ]]; then
+    echo "spike_seed_workdir: session-start.sh missing in $hooks_src" >&2
+    return 1
+  fi
+  if [[ ! -f "$hooks_src/settings.template.json" ]]; then
+    echo "spike_seed_workdir: settings.template.json missing in $hooks_src" >&2
+    return 1
+  fi
+
+  local seed="$instance/.e2e-workdir"
+  mkdir -p "$seed/.claude/hooks"
+  cp "$hooks_src/session-start.sh" "$seed/.claude/hooks/session-start.sh"
+  chmod +x "$seed/.claude/hooks/session-start.sh"
+  cp "$hooks_src/settings.template.json" "$seed/.claude/settings.json"
+}
+
 spike_rebuild_instance() {
   if [[ $# -ne 1 ]]; then
     echo "spike_rebuild_instance: usage: spike_rebuild_instance <instance>" >&2

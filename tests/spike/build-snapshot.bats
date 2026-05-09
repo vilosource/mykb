@@ -107,6 +107,35 @@ EOF
   [[ "$output" == *"not captured"* ]] || [[ "$output" == *"cli.js"* ]]
 }
 
+# Workdir-seed for claude-code runtime experiments.
+@test "spike_seed_workdir copies hooks into <instance>/.e2e-workdir/.claude" {
+  # Build a minimal hooks dir in our fake repo.
+  mkdir -p "$REPO/hooks/claude-code"
+  echo "#!/bin/bash" > "$REPO/hooks/claude-code/session-start.sh"
+  chmod +x "$REPO/hooks/claude-code/session-start.sh"
+  echo '{"hooks":{}}' > "$REPO/hooks/claude-code/settings.template.json"
+
+  run spike_seed_workdir "$REPO" "$INSTANCE"
+  [ "$status" -eq 0 ]
+  [ -d "$INSTANCE/.e2e-workdir/.claude/hooks" ]
+  [ -x "$INSTANCE/.e2e-workdir/.claude/hooks/session-start.sh" ]
+  [ -f "$INSTANCE/.e2e-workdir/.claude/settings.json" ]
+}
+
+@test "spike_seed_workdir refuses when hooks/claude-code missing" {
+  run spike_seed_workdir "$REPO" "$INSTANCE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"hooks"* ]]
+}
+
+@test "spike_seed_workdir refuses when session-start.sh missing" {
+  mkdir -p "$REPO/hooks/claude-code"
+  echo '{"hooks":{}}' > "$REPO/hooks/claude-code/settings.template.json"
+  run spike_seed_workdir "$REPO" "$INSTANCE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"session-start"* ]]
+}
+
 @test "spike_rebuild_instance propagates non-zero exit from cli" {
   spike_capture_build "$REPO" "$INSTANCE"
   cat > "$INSTANCE/.e2e-build/cli/cli.js" <<'EOF'

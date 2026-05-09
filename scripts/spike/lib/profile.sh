@@ -56,12 +56,6 @@ spike_write_profile() {
     return 1
   fi
 
-  local bundle="$instance/.e2e-build/bundle"
-  if [[ ! -d "$bundle" || ! -f "$bundle/index.js" ]]; then
-    echo "spike_write_profile: captured bundle missing at $bundle (run spike_capture_build first)" >&2
-    return 1
-  fi
-
   local profiles_dir
   profiles_dir="$(_spike_profiles_dir)"
   mkdir -p "$profiles_dir"
@@ -70,9 +64,25 @@ spike_write_profile() {
   local yaml
   yaml="$(spike_profile_path "$exp_id")"
 
-  # Heredoc with explicit string substitutions. Mode/format mirror the
-  # existing profiles in ~/.vf-agents/profiles/ so vfa accepts the schema.
-  cat > "$yaml" <<EOF
+  # Two runtimes today, two profile shapes:
+  #   pi: the kb extension bundle is mounted as a Pi plugin; auto-injection
+  #       (system prompt + per-turn context) and registered tools come for
+  #       free via the extension's lifecycle hooks.
+  #   claude-code: there's no kb extension; auto-injection is achieved via
+  #       SessionStart / UserPromptSubmit hooks declared in
+  #       <workdir>/.claude/settings.json. The hook scripts shell out to
+  #       the captured kb CLI (mounted at /opt/mykb-cli) and emit JSON
+  #       with `additionalContext` to inject for the LLM.
+  local runtime="${SPIKE_RUNTIME:-pi}"
+
+  case "$runtime" in
+    pi)
+      local bundle="$instance/.e2e-build/bundle"
+      if [[ ! -d "$bundle" || ! -f "$bundle/index.js" ]]; then
+        echo "spike_write_profile: captured bundle missing at $bundle (run spike_capture_build first)" >&2
+        return 1
+      fi
+      cat > "$yaml" <<EOF
 id: e2e-${exp_id}
 description: "kb-spike experiment instance: ${exp_id}"
 compatible_runtimes: [pi]
@@ -89,6 +99,44 @@ plugins:
 extra_volumes:
   - "${instance}:/home/node/.mykb"
 EOF
+      ;;
+    claude-code)
+      local cli="$instance/.e2e-build/cli"
+      local workdir="$instance/.e2e-workdir"
+      if [[ ! -d "$cli" || ! -f "$cli/cli.js" ]]; then
+        echo "spike_write_profile: captured cli missing at $cli (run spike_capture_build first)" >&2
+        return 1
+      fi
+      if [[ ! -d "$workdir" ]]; then
+        echo "spike_write_profile: workdir-seed missing at $workdir (run spike_seed_workdir first)" >&2
+        return 1
+      fi
+      # workdir.type: persistent + source mounts our seed dir directly
+      # as /workspace inside the container (so .claude/settings.json is
+      # in the project root claude-code expects). Mounting via
+      # extra_volumes alongside an ephemeral workdir created two binds
+      # to /workspace and the ephemeral won — hooks were never read.
+      cat > "$yaml" <<EOF
+id: e2e-${exp_id}
+description: "kb-spike experiment instance: ${exp_id} (claude-code)"
+compatible_runtimes: [claude-code]
+workdir:
+  type: persistent
+  source: ${workdir}
+  mount_path: /workspace
+mode: headless
+output_format: json
+timeout: ${timeout}
+extra_volumes:
+  - "${instance}:/home/node/.mykb"
+  - "${cli}:/opt/mykb-cli"
+EOF
+      ;;
+    *)
+      echo "spike_write_profile: unsupported runtime: $runtime" >&2
+      return 1
+      ;;
+  esac
 }
 
 spike_remove_profile() {

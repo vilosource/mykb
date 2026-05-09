@@ -85,11 +85,12 @@ _require_instance() {
 # ── Verbs ────────────────────────────────────────────────────────
 
 cmd_new() {
-  local experiment="" intent=""
+  local experiment="" intent="" runtime="pi"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --experiment) experiment="$2"; shift 2;;
       --intent)     intent="$2";     shift 2;;
+      --runtime)    runtime="$2";    shift 2;;
       *) _die "new: unknown arg: $1";;
     esac
   done
@@ -108,10 +109,17 @@ cmd_new() {
   echo "kb-spike: rebuilding instance SQLite via captured cli" >&2
   spike_rebuild_instance "$instance" >/dev/null
 
+  # claude-code runtime needs a workdir-seed (.claude/settings.json +
+  # hook scripts) mounted as /workspace inside the container.
+  if [[ "$runtime" == "claude-code" ]]; then
+    echo "kb-spike: seeding claude-code workdir from $SPIKE_REPO_ROOT/hooks/claude-code" >&2
+    spike_seed_workdir "$SPIKE_REPO_ROOT" "$instance"
+  fi
+
   local profile_path
   profile_path="$(spike_profile_path "$exp_id")"
-  echo "kb-spike: writing vfa profile $profile_path" >&2
-  spike_write_profile "$exp_id" "$instance"
+  echo "kb-spike: writing vfa profile $profile_path (runtime=$runtime)" >&2
+  SPIKE_RUNTIME="$runtime" spike_write_profile "$exp_id" "$instance"
 
   local source_commit
   source_commit="$(cd "$instance" && git rev-parse e2e/source)"
@@ -122,6 +130,7 @@ cmd_new() {
     SPIKE_SPECIMEN="$SPIKE_SPECIMEN" \
     SPIKE_SOURCE_COMMIT="$source_commit" \
     SPIKE_PROFILE_PATH="$profile_path" \
+    SPIKE_RUNTIME="$runtime" \
     spike_write_meta "$instance"
 
   # Commit captured build + meta so e2e/source has a clean working tree
@@ -138,6 +147,12 @@ cmd_new() {
 
 cmd_run_scenario() {
   [[ $# -eq 2 ]] || _die "run-scenario: usage: kb-spike run-scenario <exp_id> <scenario>"
+  # Pull the runtime out of the instance's meta so step.sh routes the
+  # right --provider. Default to pi for instances created before this
+  # field existed.
+  local runtime
+  runtime="$(spike_read_meta "$SPIKE_INSTANCES_DIR/$1" runtime 2>/dev/null || true)"
+  export SPIKE_RUNTIME="${runtime:-pi}"
   spike_run_scenario "$1" "$2"
 }
 
@@ -226,7 +241,8 @@ usage() {
 Usage: kb-spike <verb> [args...]
 
 Verbs:
-  new --experiment <name> [--intent "..."]    Create a brain instance.
+  new --experiment <name> [--intent "..."] [--runtime <pi|claude-code>]
+                                              Create a brain instance.
   run-scenario <exp_id> <scenario>            Run one scenario.
   show <exp_id>                               Print metadata + results.
   diff <exp_id> [scenario]                    Show mutations from e2e/source.

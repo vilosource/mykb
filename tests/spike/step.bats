@@ -141,6 +141,33 @@ EOF
   ! grep -q "MYKB_DISABLE_TOOLS" "$TMP/vfa-stderr"
 }
 
+@test "step uses --provider zai-glm when SPIKE_RUNTIME=claude-code" {
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+# Print every arg on its own line so grep can pin exact tokens.
+for a in "$@"; do echo "$a" >&2; done
+echo '{"result":"ok","status":"completed"}'
+EOF
+  chmod +x "$STUB_DIR/vfa"
+
+  SPIKE_RUNTIME=claude-code step "probe" --prompt "x" 2>"$TMP/vfa-stderr"
+  grep -qx "zai-glm" "$TMP/vfa-stderr"
+  ! grep -qx "pi" "$TMP/vfa-stderr"
+}
+
+@test "step uses --provider pi by default (backward compat)" {
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do echo "$a" >&2; done
+echo '{"result":"ok","status":"completed"}'
+EOF
+  chmod +x "$STUB_DIR/vfa"
+
+  unset SPIKE_RUNTIME
+  step "probe" --prompt "x" 2>"$TMP/vfa-stderr"
+  grep -qx "pi" "$TMP/vfa-stderr"
+}
+
 @test "step creates a git commit on the current branch" {
   before="$(cd "$INSTANCE" && git rev-parse HEAD)"
   step "x" --prompt "hi"

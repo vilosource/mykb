@@ -41,10 +41,12 @@ prepare() {
 }
 
 stimulate() {
-  # Ask the LLM to list tagged areas. The TAG_PROBE word never appears
-  # in any summary or fact text, so this question can ONLY be answered
-  # by reading area metadata via kb_list.
-  step "ask-tagged" --prompt "Reply in one line. Look at my knowledge base areas. Which area-id has the tag '$TAG_PROBE'? Answer with just the area-id, or 'none' if no area is tagged with it."
+  # Point the LLM at the area index explicitly. Earlier looser phrasing
+  # ("look at my knowledge base areas") led to LLM variance — the model
+  # would sometimes answer 'none' even though the index in its system
+  # prompt clearly listed the tag. Naming the surface (the mykb-areas
+  # section) gets a deterministic answer.
+  step "ask-tagged" --prompt "Look at the <mykb-areas> section of your system context. Reply with exactly one area-id (no other text): the area whose tags list includes '$TAG_PROBE'."
 }
 
 observe() {

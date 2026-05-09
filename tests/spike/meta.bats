@@ -42,6 +42,33 @@ teardown() {
   [ -n "$(jq -r .created_at "$meta")" ]
 }
 
+@test "spike_write_meta records runtime field (default pi)" {
+  SPIKE_EXP_ID="x-1" SPIKE_EXPERIMENT="x" SPIKE_INTENT="x" \
+    SPIKE_SPECIMEN="$HOME/.mykb" SPIKE_SOURCE_COMMIT="x" \
+    SPIKE_PROFILE_PATH="x" \
+    spike_write_meta "$INSTANCE"
+  [ "$(jq -r .runtime "$INSTANCE/.e2e-meta.json")" = "pi" ]
+}
+
+@test "spike_write_meta records runtime when SPIKE_RUNTIME=claude-code" {
+  SPIKE_RUNTIME="claude-code" \
+    SPIKE_EXP_ID="x-1" SPIKE_EXPERIMENT="x" SPIKE_INTENT="x" \
+    SPIKE_SPECIMEN="$HOME/.mykb" SPIKE_SOURCE_COMMIT="x" \
+    SPIKE_PROFILE_PATH="x" \
+    spike_write_meta "$INSTANCE"
+  [ "$(jq -r .runtime "$INSTANCE/.e2e-meta.json")" = "claude-code" ]
+}
+
+@test "spike_write_meta rejects unsupported runtime" {
+  run env SPIKE_RUNTIME="unknown-runtime" \
+    SPIKE_EXP_ID="x-1" SPIKE_EXPERIMENT="x" SPIKE_INTENT="x" \
+    SPIKE_SPECIMEN="$HOME/.mykb" SPIKE_SOURCE_COMMIT="x" \
+    SPIKE_PROFILE_PATH="x" \
+    bash -c "source $REPO_ROOT/scripts/spike/lib/meta.sh && spike_write_meta '$INSTANCE'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runtime"* ]]
+}
+
 @test "spike_write_meta refuses when required field missing" {
   unset SPIKE_EXP_ID SPIKE_EXPERIMENT SPIKE_INTENT SPIKE_SPECIMEN \
         SPIKE_SOURCE_COMMIT SPIKE_PROFILE_PATH

@@ -66,11 +66,23 @@ step() {
   local step_file
   step_file="$(printf '%s/%03d-%s.json' "$steps_dir" "$SPIKE_STEP_NUM" "$name")"
 
-  # Build the vfa argv. SPIKE_DISABLE_TOOLS=1 (set by scoring-isolation
-  # scenarios) translates to '--env MYKB_DISABLE_TOOLS=1', which the
-  # bundled extension reads to skip registerTools — proving the LLM
-  # answered from scoring/system-prompt context, not via a tool call.
-  local -a vfa_args=(run --provider pi --profile "e2e-${SPIKE_EXP_ID}")
+  # Build the vfa argv.
+  #
+  # Provider routing depends on the experiment's runtime:
+  #   pi          -> --provider pi          (Pi runtime, kb extension)
+  #   claude-code -> --provider zai-glm     (Claude Code via z.ai's GLM)
+  #
+  # SPIKE_DISABLE_TOOLS=1 (set by scoring-isolation scenarios) translates
+  # to '--env MYKB_DISABLE_TOOLS=1' regardless of runtime; the kb
+  # extension reads it to skip registerTools.
+  local provider="pi"
+  case "${SPIKE_RUNTIME:-pi}" in
+    pi)          provider="pi" ;;
+    claude-code) provider="zai-glm" ;;
+    *) echo "step: unsupported SPIKE_RUNTIME: ${SPIKE_RUNTIME}" >&2; return 1 ;;
+  esac
+
+  local -a vfa_args=(run --provider "$provider" --profile "e2e-${SPIKE_EXP_ID}")
   if [[ "${SPIKE_DISABLE_TOOLS:-}" == "1" ]]; then
     vfa_args+=(--env "MYKB_DISABLE_TOOLS=1")
   fi

@@ -102,13 +102,22 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `;
 
+function normalizeTags(raw: string | null): string[] {
+  if (!raw) return [];
+  const parsed = JSON.parse(raw);
+  if (Array.isArray(parsed)) return parsed as string[];
+  // Legacy format: comma-separated string (e.g. "dns,dnsmasq,ansible")
+  if (typeof parsed === 'string') return parsed.split(',').map((t) => t.trim()).filter(Boolean);
+  return [];
+}
+
 function rowToEntry(row: EntryRow): KnowledgeEntry {
   const entry: Record<string, unknown> = {
     id: row.id,
     area: row.area,
     type: row.type,
     text: row.text,
-    tags: row.tags ? (JSON.parse(row.tags) as string[]) : [],
+    tags: normalizeTags(row.tags),
     provenance: {
       status: row.prov_status ?? 'unverified',
       ...(row.prov_date ? { date: row.prov_date } : {}),
@@ -144,7 +153,7 @@ function rowToArea(row: AreaRow): AreaMetadata {
     name: row.name,
     summary: row.summary ?? '',
     owner: row.owner ?? '',
-    tags: row.tags ? (JSON.parse(row.tags) as string[]) : [],
+    tags: normalizeTags(row.tags),
     created: row.created,
     updated: row.updated,
   };
