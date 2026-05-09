@@ -23,6 +23,12 @@
 
 set -euo pipefail
 
+# Clear the operator's KB_SESSION_ID. Otherwise scenarios' `kb work
+# start` writes to a per-session file the Pi container can't see —
+# the brain mount only exposes the persistent .active file. This is the
+# canonical "kb-spike gotcha": never propagate the outer session id.
+unset KB_SESSION_ID
+
 # ── Locations ────────────────────────────────────────────────────
 
 _kb_spike_self_dir() {

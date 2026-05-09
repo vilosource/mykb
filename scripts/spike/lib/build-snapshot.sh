@@ -49,11 +49,15 @@ spike_capture_build() {
   local out="$instance/.e2e-build"
   mkdir -p "$out/bundle" "$out/cli"
 
-  # Bundle: copy index.js + package.json (so the Pi runtime sees the
-  # extension entrypoint correctly).
+  # Bundle: copy index.js + package.json + node_modules. The bundle is
+  # esbuild-built with --external:better-sqlite3, so the runtime needs
+  # the native module installed alongside.
   cp "$bundle_src" "$out/bundle/index.js"
   if [[ -f "$repo/dist/bundle/package.json" ]]; then
     cp "$repo/dist/bundle/package.json" "$out/bundle/package.json"
+  fi
+  if [[ -d "$repo/dist/bundle/node_modules" ]]; then
+    cp -r "$repo/dist/bundle/node_modules" "$out/bundle/node_modules"
   fi
 
   # CLI bundle: copy cli.js, its package.json, and node_modules so the
