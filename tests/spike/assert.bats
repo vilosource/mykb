@@ -305,6 +305,90 @@ EOF
   [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
 }
 
+@test "assert_tool_called passes when the named tool fired" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    cat <<LOG
+{"type":"session"}
+{"type":"tool_execution_start","toolName":"kb_search"}
+{"type":"tool_execution_end"}
+LOG
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_tool_called "kb_search"
+  [ "$SPIKE_ASSERT_PASS" -eq 1 ]
+  [ "$SPIKE_ASSERT_FAIL" -eq 0 ]
+
+  rm -rf "$STUB_DIR"
+}
+
+@test "assert_tool_called fails when the named tool did not fire" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    cat <<LOG
+{"type":"session"}
+{"type":"tool_execution_start","toolName":"bash"}
+{"type":"tool_execution_start","toolName":"kb_list"}
+LOG
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_tool_called "kb_search"
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+  [[ "$SPIKE_ASSERT_FAILURES" == *"kb_search"* ]]
+  [[ "$SPIKE_ASSERT_FAILURES" == *"kb_list"* ]]
+
+  rm -rf "$STUB_DIR"
+}
+
+@test "assert_tool_called requires exact name (does not prefix-match)" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    echo '{"type":"tool_execution_start","toolName":"kb_search_v2"}'
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_tool_called "kb_search"
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
+@test "assert_tool_called fails when tool name argument is empty" {
+  printf '{"run_id":"test-run-id"}\n' > "$SPIKE_LAST_STEP_FILE"
+  assert_tool_called ""
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
+@test "assert_tool_called fails when SPIKE_LAST_STEP_FILE missing" {
+  unset SPIKE_LAST_STEP_FILE
+  assert_tool_called "kb_search"
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
 # ── Counter (counters.json convention) ───────────────────────────
 
 @test "assert_counter passes for matching counter value" {

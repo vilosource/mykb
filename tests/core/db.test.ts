@@ -363,6 +363,131 @@ describe('searchEntries', () => {
 
     db.close();
   });
+
+  // --- Area-metadata search path ---
+  // FTS5 indexes (entries_fts) cover entry text + entry tags only. An
+  // area's summary and area-level tags should also be searchable so a
+  // query like "frobnicator" finds entries from the frobnicators area
+  // even when none of those entries' text/tags spell "frobnicator".
+  // Driven by experiments/kb-search/scenarios/tool-finds-via-area-metadata.sh.
+
+  it('returns entries when query matches area summary', () => {
+    const db = createDatabase(':memory:');
+
+    // Area whose summary contains the keyword. Entry text/tags do NOT.
+    upsertArea(
+      db,
+      makeArea({
+        id: 'frobnicators',
+        name: 'Frobnicators',
+        summary: 'Frobnicator calibration tolerances and drift coefficients',
+        tags: [],
+      }),
+    );
+    upsertEntry(
+      db,
+      makeEntry({
+        id: 'frob0001',
+        area: 'frobnicators',
+        text: 'blue units are rated for 12.7 hertz',
+        tags: ['spec', 'hertz'],
+      }),
+    );
+
+    const results = searchEntries(db, 'frobnicator');
+    expect(results.map((r) => r.id)).toContain('frob0001');
+
+    db.close();
+  });
+
+  it('returns entries when query matches area-level tags', () => {
+    const db = createDatabase(':memory:');
+
+    upsertArea(
+      db,
+      makeArea({
+        id: 'frobnicators',
+        name: 'Frobnicators',
+        summary: 'Hardware specifications',
+        tags: ['frobnicator', 'calibration'],
+      }),
+    );
+    upsertEntry(
+      db,
+      makeEntry({
+        id: 'frob0002',
+        area: 'frobnicators',
+        text: 'blue units are rated for 12.7 hertz',
+        tags: ['spec'],
+      }),
+    );
+
+    const results = searchEntries(db, 'frobnicator');
+    expect(results.map((r) => r.id)).toContain('frob0002');
+
+    db.close();
+  });
+
+  it('does not return entries from areas whose metadata does not match', () => {
+    const db = createDatabase(':memory:');
+
+    upsertArea(
+      db,
+      makeArea({
+        id: 'unrelated',
+        name: 'Unrelated',
+        summary: 'Topics about cooking',
+        tags: ['recipe'],
+      }),
+    );
+    upsertEntry(
+      db,
+      makeEntry({
+        id: 'cook0001',
+        area: 'unrelated',
+        text: 'simmer for 20 minutes',
+        tags: ['kitchen'],
+      }),
+    );
+
+    const results = searchEntries(db, 'frobnicator');
+    expect(results).toHaveLength(0);
+
+    db.close();
+  });
+
+  it('updates area-metadata index on upsertArea so renamed summaries are searchable', () => {
+    const db = createDatabase(':memory:');
+
+    upsertArea(
+      db,
+      makeArea({ id: 'frobnicators', summary: 'old summary about widgets', tags: [] }),
+    );
+    upsertEntry(
+      db,
+      makeEntry({ id: 'frob0003', area: 'frobnicators', text: 'plain entry', tags: [] }),
+    );
+
+    // Rename: replace the summary with one that mentions the keyword.
+    upsertArea(
+      db,
+      makeArea({
+        id: 'frobnicators',
+        summary: 'frobnicator calibration tolerances',
+        tags: [],
+        updated: '2026-04-01',
+      }),
+    );
+
+    const results = searchEntries(db, 'frobnicator');
+    expect(results.map((r) => r.id)).toContain('frob0003');
+
+    // Old summary's keyword should no longer surface the entry.
+    const stale = searchEntries(db, 'widgets');
+    expect(stale).toHaveLength(0);
+
+    db.close();
+  });
 });
 
 // --- 3b. sanitizeFtsQuery ---

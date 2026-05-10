@@ -236,6 +236,46 @@ assert_no_tool_calls() {
   fi
 }
 
+# Asserts the most recent step DID invoke a tool whose name equals the
+# given argument. Positive companion to assert_no_tool_calls — used by
+# scenarios that want to prove the answer came through a specific tool
+# path (e.g. kb_search) rather than via a system-prompt injection.
+#
+# Match is exact (toolName == arg). Use the exact tool registration name
+# from registerTools (`kb_search`, `kb_list`, `kb_load`, ...).
+assert_tool_called() {
+  local name="$1"
+  if [[ -z "$name" ]]; then
+    _spike_assert_fail "assert_tool_called: tool name required"
+    return 0
+  fi
+  if [[ -z "${SPIKE_LAST_STEP_FILE:-}" || ! -f "$SPIKE_LAST_STEP_FILE" ]]; then
+    _spike_assert_fail "assert_tool_called: SPIKE_LAST_STEP_FILE missing or unset"
+    return 0
+  fi
+  local run_id
+  run_id="$(jq -r '.run_id // empty' "$SPIKE_LAST_STEP_FILE")"
+  if [[ -z "$run_id" ]]; then
+    _spike_assert_fail "assert_tool_called: step file has no run_id field"
+    return 0
+  fi
+
+  local logs
+  logs="$(vfa logs --raw "$run_id" 2>/dev/null || true)"
+  local fired
+  fired="$(grep '"type":"tool_execution_start"' <<<"$logs" 2>/dev/null \
+           | jq -r --arg n "$name" 'select((.toolName // .tool // "") == $n) | .toolName // .tool // "?"' 2>/dev/null \
+           | head -n1)"
+  if [[ -n "$fired" ]]; then
+    _spike_assert_pass
+  else
+    local seen
+    seen="$(grep '"type":"tool_execution_start"' <<<"$logs" 2>/dev/null \
+            | jq -r '.toolName // .tool // "?"' 2>/dev/null | sort -u | tr '\n' ',' | sed 's/,$//')"
+    _spike_assert_fail "assert_tool_called(${name}): not fired; tools seen: ${seen:-<none>}"
+  fi
+}
+
 # ── Counter (counters.json convention) ───────────────────────────
 
 assert_counter() {
