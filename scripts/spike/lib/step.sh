@@ -75,6 +75,15 @@ step() {
   # SPIKE_DISABLE_TOOLS=1 (set by scoring-isolation scenarios) translates
   # to '--env MYKB_DISABLE_TOOLS=1' regardless of runtime; the kb
   # extension reads it to skip registerTools.
+  #
+  # SPIKE_SCENARIO_SESSION_ID is a per-scenario stable session id derived
+  # from the experiment id + scenario name. When set, every step within
+  # one scenario reuses it via --env KB_SESSION_ID=<id>, allowing mykb's
+  # extension state (signals, loaded areas, turn count) to persist across
+  # the separate Pi containers that each `step` spins up. Different
+  # scenarios get different ids so they never share state. See
+  # src/extension/state.ts (file-backed SessionState) and
+  # experiments/area-scoring/scenarios/scoring-isolated.sh.
   local provider="pi"
   case "${SPIKE_RUNTIME:-pi}" in
     pi)          provider="pi" ;;
@@ -85,6 +94,9 @@ step() {
   local -a vfa_args=(run --provider "$provider" --profile "e2e-${SPIKE_EXP_ID}")
   if [[ "${SPIKE_DISABLE_TOOLS:-}" == "1" ]]; then
     vfa_args+=(--env "MYKB_DISABLE_TOOLS=1")
+  fi
+  if [[ -n "${SPIKE_SCENARIO_SESSION_ID:-}" ]]; then
+    vfa_args+=(--env "KB_SESSION_ID=${SPIKE_SCENARIO_SESSION_ID}")
   fi
   vfa_args+=(--prompt "$prompt")
 

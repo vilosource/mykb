@@ -24,7 +24,17 @@ export default function (pi: ExtensionAPI): void {
   }
 
   const store = MykbStore.open(brainPath);
-  const state = new SessionState();
+  // SessionState.create() with KB_SESSION_ID enables persistence across
+  // separate Pi container invocations that share the same session id —
+  // signals seeded by a prior turn's input/tool events become visible
+  // to a new container's context hook on its first turn. State is
+  // written under <brainPath>/.sessions/<id>.json (the brain mount is
+  // shared across containers; container-local /tmp would be lost at
+  // container exit). Without KB_SESSION_ID, persistence is disabled
+  // and behavior matches the historical in-memory-only default. See
+  // src/extension/state.ts and experiments/area-scoring/scenarios/
+  // scoring-isolated.sh for the load-bearing case.
+  const state = SessionState.create(process.env.KB_SESSION_ID, brainPath);
   const wsStorage = new FileSystemWorkspaceStorage(brainPath);
 
   // Session lifecycle hooks (includes Tier 1 — before_agent_start area index)

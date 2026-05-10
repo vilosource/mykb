@@ -305,6 +305,54 @@ EOF
   [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
 }
 
+@test "assert_no_tool_calls with empty prefix arg matches any tool name" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    echo '{"type":"tool_execution_start","toolName":"bash"}'
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  # Empty prefix should catch "bash" — required by scoring-isolated
+  # scenarios that forbid all tool calls (kb_* AND Pi runtime tools).
+  assert_no_tool_calls ""
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+  [[ "$SPIKE_ASSERT_FAILURES" == *"bash"* ]]
+
+  rm -rf "$STUB_DIR"
+}
+
+@test "assert_no_tool_calls with empty prefix passes when no tools fired" {
+  STUB_DIR=$(mktemp -d)
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  logs)
+    cat <<LOG
+{"type":"session"}
+{"type":"turn_end"}
+LOG
+    ;;
+esac
+EOF
+  chmod +x "$STUB_DIR/vfa"
+  PATH="$STUB_DIR:$PATH"
+
+  printf '{"run_id":"test-run-id","status":"completed","result":"ok"}\n' > "$SPIKE_LAST_STEP_FILE"
+
+  assert_no_tool_calls ""
+  [ "$SPIKE_ASSERT_PASS" -eq 1 ]
+
+  rm -rf "$STUB_DIR"
+}
+
 @test "assert_tool_called passes when the named tool fired" {
   STUB_DIR=$(mktemp -d)
   cat > "$STUB_DIR/vfa" <<'EOF'

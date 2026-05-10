@@ -18,10 +18,22 @@ export function initBrain(brainPath: string): void {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
   }
 
-  // Create .gitignore
+  // Create .gitignore. Includes:
+  //   - SQLite mirror (kb.db, kb.db-wal, kb.db-shm) — regenerated from
+  //     JSONL by `kb rebuild`.
+  //   - .sessions/ — per-session ephemeral state written by the Pi
+  //     extension when KB_SESSION_ID is set (file-backed SessionState).
+  //     Local-only, must never be committed.
   const gitignorePath = path.join(brainPath, '.gitignore');
   if (!fs.existsSync(gitignorePath)) {
-    fs.writeFileSync(gitignorePath, 'kb.db\nkb.db-wal\nkb.db-shm\n');
+    fs.writeFileSync(gitignorePath, 'kb.db\nkb.db-wal\nkb.db-shm\n.sessions/\n');
+  } else {
+    // Existing brains predate the .sessions/ entry; append it once.
+    const current = fs.readFileSync(gitignorePath, 'utf-8');
+    if (!current.split('\n').some((l) => l.trim() === '.sessions/')) {
+      const sep = current.endsWith('\n') ? '' : '\n';
+      fs.appendFileSync(gitignorePath, `${sep}.sessions/\n`);
+    }
   }
 
   // Git init (idempotent)

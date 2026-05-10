@@ -72,6 +72,16 @@ spike_run_scenario() {
   export SPIKE_EXP_ID="$exp_id"
   export SPIKE_SCENARIO="$scenario"
   export SPIKE_STEP_NUM=0
+  # Per-scenario stable session id. Threaded into vfa via step.sh as
+  # KB_SESSION_ID so mykb's extension state (signals, loaded areas)
+  # persists across the separate Pi containers a scenario's multiple
+  # `step` calls spin up. Each scenario gets a unique id (so cross-
+  # scenario state never leaks); within a scenario the id is stable
+  # (so signals from step N feed step N+1). The session-state file at
+  # <brainPath>/.sessions/<id>.json is wiped at scenario start so
+  # retries don't see stale state from prior runs.
+  export SPIKE_SCENARIO_SESSION_ID="spike-${exp_id}-${scenario}"
+  rm -f "${instance}/.sessions/${SPIKE_SCENARIO_SESSION_ID}.json" 2>/dev/null || true
   unset SPIKE_LAST_STEP_FILE SPIKE_SCENARIO_INTENT
   spike_assert_reset
 

@@ -211,7 +211,11 @@ assert_jsonl_count() {
 # the JSONL event stream — which includes tool_execution_start events
 # with a `toolName` field when tools fire.
 assert_no_tool_calls() {
-  local prefix="${1:-kb_}"
+  # `${1-kb_}` (no colon) defaults only when the arg is UNSET; an
+  # empty string explicit arg means "any tool name (empty prefix
+  # matches every tool)". This lets scoring-isolated scenarios
+  # forbid bash/Read/Write/kb_* in one assertion via `""`.
+  local prefix="${1-kb_}"
   if [[ -z "${SPIKE_LAST_STEP_FILE:-}" || ! -f "$SPIKE_LAST_STEP_FILE" ]]; then
     _spike_assert_fail "assert_no_tool_calls: SPIKE_LAST_STEP_FILE missing or unset"
     return 0

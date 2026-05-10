@@ -141,6 +141,44 @@ EOF
   ! grep -q "MYKB_DISABLE_TOOLS" "$TMP/vfa-stderr"
 }
 
+@test "step passes --env KB_SESSION_ID=<id> when SPIKE_SCENARIO_SESSION_ID is set" {
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+printf 'ARGV: %q ' "$@" >&2
+echo '{"result":"ok","status":"completed"}'
+EOF
+  chmod +x "$STUB_DIR/vfa"
+
+  SPIKE_SCENARIO_SESSION_ID="spike-test-id" step "probe" --prompt "x" 2>"$TMP/vfa-stderr"
+  grep -q "KB_SESSION_ID=spike-test-id" "$TMP/vfa-stderr"
+}
+
+@test "step does not pass --env KB_SESSION_ID when SPIKE_SCENARIO_SESSION_ID is unset" {
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+printf 'ARGV: %q ' "$@" >&2
+echo '{"result":"ok","status":"completed"}'
+EOF
+  chmod +x "$STUB_DIR/vfa"
+
+  unset SPIKE_SCENARIO_SESSION_ID
+  step "probe" --prompt "x" 2>"$TMP/vfa-stderr"
+  ! grep -q "KB_SESSION_ID" "$TMP/vfa-stderr"
+}
+
+@test "step passes both env vars when SPIKE_DISABLE_TOOLS=1 and SPIKE_SCENARIO_SESSION_ID set" {
+  cat > "$STUB_DIR/vfa" <<'EOF'
+#!/usr/bin/env bash
+printf 'ARGV: %q ' "$@" >&2
+echo '{"result":"ok","status":"completed"}'
+EOF
+  chmod +x "$STUB_DIR/vfa"
+
+  SPIKE_DISABLE_TOOLS=1 SPIKE_SCENARIO_SESSION_ID="spike-x" step "probe" --prompt "x" 2>"$TMP/vfa-stderr"
+  grep -q "MYKB_DISABLE_TOOLS=1" "$TMP/vfa-stderr"
+  grep -q "KB_SESSION_ID=spike-x" "$TMP/vfa-stderr"
+}
+
 @test "step uses --provider zai-glm when SPIKE_RUNTIME=claude-code" {
   cat > "$STUB_DIR/vfa" <<'EOF'
 #!/usr/bin/env bash
