@@ -9,10 +9,14 @@
 # Verbs (see kb-spike <verb> --help, or below):
 #   new            create a brain instance + capture build + write profile
 #   run-scenario   execute one scenario from experiments/<feature>/scenarios/
+#   run            ad-hoc one-prompt spike on an existing instance
 #   show           print metadata + scenario pass/fail summary
 #   diff           git diff e2e/source..HEAD (or e2e/source..e2e/<scenario>-end)
 #   list           list active experiments under SPIKE_INSTANCES_DIR
+#   archive        move instance to archive/ (preserves history)
 #   discard        remove instance + vfa profile (run record stays in repo)
+#   promote        generate experiments/<feature>/scenarios/<name>.sh from
+#                  an ad-hoc spike branch (or another scenario)
 #
 # Environment:
 #   SPIKE_INSTANCES_DIR  default: $HOME/.mykb-experiments
@@ -234,6 +238,218 @@ cmd_discard() {
   rm -rf "$instance"
 }
 
+# archive — softer alternative to discard. Moves the instance to
+# SPIKE_INSTANCES_DIR/archive/<exp_id>/ (preserving git history and
+# step files) and removes the vfa profile. The instance no longer
+# appears in `kb-spike list` (which reads the active dir only); the
+# operator can inspect the archived tree manually with normal git
+# tools, or move it back to the active dir if needed.
+#
+# Use when an instance documents an interesting state (failed scenario,
+# spike result worth revisiting) but shouldn't clutter the active list.
+cmd_archive() {
+  [[ $# -eq 1 ]] || _die "archive: usage: kb-spike archive <exp_id>"
+  local exp_id="$1"
+  local instance="$SPIKE_INSTANCES_DIR/$exp_id"
+  [[ -d "$instance" ]] || _die "no such instance: $instance"
+
+  local archive_dir="$SPIKE_INSTANCES_DIR/archive"
+  mkdir -p "$archive_dir"
+  local target="$archive_dir/$exp_id"
+  if [[ -e "$target" ]]; then
+    _die "archive target already exists: $target (move or remove it manually)"
+  fi
+
+  echo "kb-spike: removing profile e2e-$exp_id" >&2
+  spike_remove_profile "$exp_id"
+  echo "kb-spike: archiving instance $instance -> $target" >&2
+  mv "$instance" "$target"
+}
+
+# run — ad-hoc one-prompt spike against an existing instance. No
+# scenario file; just send a prompt to vfa, capture the JSON result,
+# commit on a stable e2e/_adhoc branch so multiple ad-hoc steps
+# accumulate into a re-readable history. The captured JSON lands
+# under <instance>/.e2e-steps/_adhoc/NNN-spike.json, parallel to
+# scenario step files.
+#
+# Use during exploration: "what does the LLM do if I ask this?"
+# A successful spike can later be lifted into a scripted scenario
+# via `kb-spike promote`.
+cmd_run() {
+  local exp_id="" prompt=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --prompt) prompt="$2"; shift 2;;
+      *)
+        if [[ -z "$exp_id" ]]; then
+          exp_id="$1"; shift
+        else
+          _die "run: unexpected arg: $1"
+        fi;;
+    esac
+  done
+  [[ -n "$exp_id" ]] || _die "run: usage: kb-spike run <exp_id> --prompt \"...\""
+  [[ -n "$prompt" ]] || _die "run: --prompt is required"
+  local instance
+  instance="$(_require_instance "$exp_id")"
+
+  # Pull runtime from meta so the underlying step.sh routes the right
+  # --provider. Mirrors run-scenario's behavior.
+  local runtime
+  runtime="$(spike_read_meta "$instance" runtime 2>/dev/null || true)"
+  export SPIKE_RUNTIME="${runtime:-pi}"
+
+  # The lib/step.sh helpers depend on these scenario-shaped exports.
+  # _adhoc is a reserved name a real scenario can't take (scenario
+  # files live under experiments/<feature>/scenarios/ and shell-source
+  # legality is checked there).
+  export SPIKE_INSTANCE="$instance"
+  export SPIKE_EXP_ID="$exp_id"
+  export SPIKE_SCENARIO="_adhoc"
+  # Stable session id for ad-hoc runs so multiple `run` invocations on
+  # the same instance share session state via file-backed SessionState.
+  # Different from run-scenario's per-scenario id so adhoc and scripted
+  # work don't cross-contaminate.
+  export SPIKE_SCENARIO_SESSION_ID="spike-${exp_id}-_adhoc"
+
+  # SPIKE_STEP_NUM persists across multiple `run` calls on the same
+  # instance: read the highest existing _adhoc step number and continue
+  # from there. Otherwise each run overwrites step 001.
+  local steps_dir="$instance/.e2e-steps/_adhoc"
+  if [[ -d "$steps_dir" ]]; then
+    local last
+    last="$(ls "$steps_dir" 2>/dev/null | grep -oE '^[0-9]+' | sort -n | tail -1 || true)"
+    SPIKE_STEP_NUM="${last:-0}"
+  else
+    SPIKE_STEP_NUM=0
+  fi
+  export SPIKE_STEP_NUM
+
+  # Source the helpers and ensure we're on the _adhoc branch (created
+  # on first run).
+  # shellcheck source=lib/step.sh
+  source "$KB_SPIKE_LIB/step.sh"
+  (
+    cd "$instance"
+    if ! git rev-parse --verify "e2e/_adhoc" >/dev/null 2>&1; then
+      git checkout -q -b "e2e/_adhoc" "e2e/source"
+    else
+      git checkout -q "e2e/_adhoc"
+    fi
+  )
+
+  step "spike" --prompt "$prompt"
+  echo "kb-spike: $SPIKE_LAST_STEP_FILE" >&2
+}
+
+# promote — turn an ad-hoc spike or scenario branch into a versioned
+# scenario script under experiments/<feature>/scenarios/<name>.sh.
+# Reads the step JSONs (each contains the prompt that produced it)
+# and emits a scaffold the operator fills in (intent + observe).
+#
+# Source branch defaults to e2e/_adhoc (the spike branch). Use
+# --from <scenario> to promote a scenario branch to a new variant.
+cmd_promote() {
+  local exp_id="" scenario_name="" from="_adhoc"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --as) scenario_name="$2"; shift 2;;
+      --from) from="$2"; shift 2;;
+      *)
+        if [[ -z "$exp_id" ]]; then
+          exp_id="$1"; shift
+        else
+          _die "promote: unexpected arg: $1"
+        fi;;
+    esac
+  done
+  [[ -n "$exp_id" ]] || _die "promote: usage: kb-spike promote <exp_id> --as <scenario_name> [--from <branch>]"
+  [[ -n "$scenario_name" ]] || _die "promote: --as <scenario_name> is required"
+  if [[ "$scenario_name" =~ [^a-zA-Z0-9_-] ]]; then
+    _die "promote: scenario name must match [a-zA-Z0-9_-]+"
+  fi
+  local instance
+  instance="$(_require_instance "$exp_id")"
+
+  local experiment
+  experiment="$(spike_read_meta "$instance" experiment)"
+  local scenarios_dir="$SPIKE_REPO_ROOT/experiments/$experiment/scenarios"
+  [[ -d "$scenarios_dir" ]] || _die "scenarios dir missing: $scenarios_dir"
+  local target="$scenarios_dir/$scenario_name.sh"
+  [[ -e "$target" ]] && _die "scenario already exists: $target (delete or pick a different name)"
+
+  # Collect prompts from the source branch's step files.
+  local steps_dir="$instance/.e2e-steps/$from"
+  if [[ ! -d "$steps_dir" ]]; then
+    _die "no step files at $steps_dir (run a spike or scenario first)"
+  fi
+  shopt -s nullglob
+  local step_files=("$steps_dir"/*.json)
+  shopt -u nullglob
+  if [[ ${#step_files[@]} -eq 0 ]]; then
+    _die "no step files in $steps_dir"
+  fi
+
+  # Generate the scaffold. Step prompts become `step "<name>"
+  # --prompt "..."` calls; the operator adds prepare() + observe().
+  {
+    cat <<'HEAD'
+# Generated by `kb-spike promote`. Fill in the intent line, the
+# prepare() body (any `kb` calls needed to set up plausible workflow
+# lineage), and the observe() assertions before committing.
+
+intent "TODO: one-line description of what this scenario probes"
+
+prepare() {
+  # TODO: kb commands to seed the brain instance with the state this
+  # scenario needs. Each line should plausibly be something a real
+  # session would do.
+  :
+}
+
+stimulate() {
+HEAD
+    local f i=0 prompt step_name
+    for f in "${step_files[@]}"; do
+      i=$(( i + 1 ))
+      step_name="$(basename "$f" .json | sed 's/^[0-9]*-//')"
+      # Read the prompt from the step JSON. Pi/vfa stores it in
+      # provider_config.prompt or input — but the simplest source is
+      # to recover from git log of the step commit. Fall back to a
+      # placeholder if neither path resolves.
+      prompt="$(jq -r '.input // .prompt // empty' "$f" 2>/dev/null || true)"
+      if [[ -z "$prompt" ]]; then
+        # Recover from the step commit message. step.sh writes:
+        #   "step(<scenario>/<n>): <name>"
+        # — the prompt itself isn't in the commit, so fall back to a
+        # placeholder pointing the operator at the step file.
+        prompt="TODO: recover prompt from $(basename "$f")"
+      fi
+      # Bash heredoc-safe: any literal " in the prompt would break the
+      # generated step call. Convert " → \" inline.
+      prompt="${prompt//\"/\\\"}"
+      printf '  step "%s" --prompt "%s"\n' "$step_name" "$prompt"
+    done
+    cat <<'TAIL'
+}
+
+observe() {
+  # TODO: assertions over the LAST step's output. Common patterns:
+  #   assert_step_status_is "completed"
+  #   assert_llm_contains "MARKER"
+  #   assert_tool_called "kb_search"
+  #   assert_no_tool_calls "kb_load"
+  :
+}
+TAIL
+  } > "$target"
+
+  echo "kb-spike: wrote scaffold $target" >&2
+  echo "kb-spike: $i step(s) translated from $steps_dir" >&2
+  echo "kb-spike: edit intent/prepare/observe and commit" >&2
+}
+
 # ── Dispatch ─────────────────────────────────────────────────────
 
 usage() {
@@ -244,10 +460,15 @@ Verbs:
   new --experiment <name> [--intent "..."] [--runtime <pi|claude-code>]
                                               Create a brain instance.
   run-scenario <exp_id> <scenario>            Run one scenario.
+  run <exp_id> --prompt "..."                 Ad-hoc one-prompt spike.
   show <exp_id>                               Print metadata + results.
   diff <exp_id> [scenario]                    Show mutations from e2e/source.
   list                                        List active experiments.
+  archive <exp_id>                            Move instance to archive/ + drop profile.
   discard <exp_id>                            Remove instance + profile.
+  promote <exp_id> --as <scenario_name> [--from <branch>]
+                                              Generate scenarios/<name>.sh from
+                                              an _adhoc branch (or another scenario).
 
 Environment:
   SPIKE_INSTANCES_DIR (default: \$HOME/.mykb-experiments)
@@ -266,10 +487,13 @@ main() {
   case "$verb" in
     new)            cmd_new "$@";;
     run-scenario)   cmd_run_scenario "$@";;
+    run)            cmd_run "$@";;
     show)           cmd_show "$@";;
     diff)           cmd_diff "$@";;
     list)           cmd_list "$@";;
+    archive)        cmd_archive "$@";;
     discard)        cmd_discard "$@";;
+    promote)        cmd_promote "$@";;
     -h|--help|help) usage;;
     *) _die "unknown verb: $verb (run 'kb-spike --help')";;
   esac

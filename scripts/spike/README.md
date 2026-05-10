@@ -7,12 +7,33 @@ Operator tool for running Layer-4 mykb experiments.
 
 ```
 kb-spike new --experiment <name> [--intent "..."]    # create instance
-kb-spike run-scenario <exp_id> <scenario>            # run one scenario
+kb-spike run-scenario <exp_id> <scenario>            # run one scripted scenario
+kb-spike run <exp_id> --prompt "..."                 # ad-hoc one-prompt spike
 kb-spike show <exp_id>                               # metadata + results
 kb-spike diff <exp_id> [scenario]                    # git diff e2e/source..HEAD
 kb-spike list                                        # all active experiments
+kb-spike archive <exp_id>                            # move instance to archive/ + drop profile
 kb-spike discard <exp_id>                            # rm instance + profile
+kb-spike promote <exp_id> --as <name> [--from <branch>]   # spike → scenario scaffold
 ```
+
+### Spike → scenario lifecycle
+
+`run` is the exploration primitive: ad-hoc prompts against an existing
+instance, captured to `<instance>/.e2e-steps/_adhoc/NNN-spike.json` on
+the `e2e/_adhoc` branch. Successive `run` calls accumulate (step
+counter advances across invocations).
+
+`promote` graduates a successful spike into a versioned scenario:
+reads the captured step JSONs, emits a scaffold under
+`experiments/<feature>/scenarios/<name>.sh` with `intent` /
+`prepare` / `stimulate` / `observe` blocks. The operator fills in
+`prepare()` (any `kb` setup needed) and `observe()` (the
+assertions). `stimulate()` is pre-populated with `step` calls
+matching the spike's prompts.
+
+Use `--from <scenario>` to promote a passing scripted scenario into
+a sibling variant (saves rewriting the prompts).
 
 ## Quick start
 

@@ -165,3 +165,156 @@ teardown() {
   run "$KB_SPIKE" frobnicate
   [ "$status" -ne 0 ]
 }
+
+@test "archive moves instance to archive/ and removes profile" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke --intent "for archive" 2>/dev/null | tail -1)"
+  [ -d "$SPIKE_INSTANCES_DIR/$exp_id" ]
+
+  run "$KB_SPIKE" archive "$exp_id"
+  [ "$status" -eq 0 ]
+  # Active dir is gone…
+  [ ! -d "$SPIKE_INSTANCES_DIR/$exp_id" ]
+  # …but the instance is preserved under archive/.
+  [ -d "$SPIKE_INSTANCES_DIR/archive/$exp_id/.git" ]
+  # Profile is removed.
+  [ ! -f "$VFA_HOME/profiles/e2e-$exp_id.yaml" ]
+  # Meta still readable so an operator can inspect the archived state.
+  [ -f "$SPIKE_INSTANCES_DIR/archive/$exp_id/.e2e-meta.json" ]
+}
+
+@test "archive errors when target already exists" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+
+  # Pre-create the archive target with the same name.
+  mkdir -p "$SPIKE_INSTANCES_DIR/archive/$exp_id"
+
+  run "$KB_SPIKE" archive "$exp_id"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"archive target already exists"* ]]
+  # Original instance untouched on failure.
+  [ -d "$SPIKE_INSTANCES_DIR/$exp_id" ]
+}
+
+@test "archive errors on missing instance" {
+  run "$KB_SPIKE" archive nonexistent-exp-id
+  [ "$status" -ne 0 ]
+}
+
+@test "list ignores archive/ subdir" {
+  # Archive directory shouldn't appear as if it were an instance.
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  "$KB_SPIKE" archive "$exp_id" >/dev/null 2>&1
+
+  run "$KB_SPIKE" list
+  [ "$status" -eq 0 ]
+  # The archived id won't appear (its containing dir is now archive/<id>,
+  # not the active root). Belt-and-suspenders: assert the literal
+  # "archive  " row doesn't show up either.
+  [[ "$output" != *"$exp_id"* ]]
+}
+
+@test "run --prompt creates an _adhoc step on a fresh _adhoc branch" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+
+  run "$KB_SPIKE" run "$exp_id" --prompt "what does the LLM do?"
+  [ "$status" -eq 0 ]
+
+  # _adhoc step file exists with sequential index.
+  [ -f "$SPIKE_INSTANCES_DIR/$exp_id/.e2e-steps/_adhoc/001-spike.json" ]
+  # The vfa stub echoes the prompt back into result; the captured JSON
+  # should contain it.
+  grep -q "what does the LLM do?" "$SPIKE_INSTANCES_DIR/$exp_id/.e2e-steps/_adhoc/001-spike.json"
+
+  # Branch e2e/_adhoc was created.
+  (cd "$SPIKE_INSTANCES_DIR/$exp_id" && git rev-parse --verify e2e/_adhoc) >/dev/null
+}
+
+@test "run accumulates step numbers across invocations" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+
+  "$KB_SPIKE" run "$exp_id" --prompt "first" >/dev/null 2>&1
+  "$KB_SPIKE" run "$exp_id" --prompt "second" >/dev/null 2>&1
+  "$KB_SPIKE" run "$exp_id" --prompt "third" >/dev/null 2>&1
+
+  [ -f "$SPIKE_INSTANCES_DIR/$exp_id/.e2e-steps/_adhoc/001-spike.json" ]
+  [ -f "$SPIKE_INSTANCES_DIR/$exp_id/.e2e-steps/_adhoc/002-spike.json" ]
+  [ -f "$SPIKE_INSTANCES_DIR/$exp_id/.e2e-steps/_adhoc/003-spike.json" ]
+}
+
+@test "run errors when --prompt missing" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  run "$KB_SPIKE" run "$exp_id"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--prompt is required"* ]]
+}
+
+@test "run errors when exp_id missing" {
+  run "$KB_SPIKE" run --prompt "x"
+  [ "$status" -ne 0 ]
+}
+
+@test "promote generates a scenario scaffold from _adhoc steps" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  "$KB_SPIKE" run "$exp_id" --prompt "first probe" >/dev/null 2>&1
+  "$KB_SPIKE" run "$exp_id" --prompt "second probe" >/dev/null 2>&1
+
+  run "$KB_SPIKE" promote "$exp_id" --as graduated
+  [ "$status" -eq 0 ]
+
+  scaffold="$SPIKE_REPO_ROOT/experiments/smoke/scenarios/graduated.sh"
+  [ -f "$scaffold" ]
+  # Scaffold has the expected sections.
+  grep -q "intent " "$scaffold"
+  grep -q "prepare()" "$scaffold"
+  grep -q "stimulate()" "$scaffold"
+  grep -q "observe()" "$scaffold"
+  # Both adhoc step prompts ended up as `step` calls in stimulate().
+  grep -q "step \"spike\" --prompt" "$scaffold"
+  # The TODO markers are present so the operator knows to fill them in.
+  grep -q "TODO" "$scaffold"
+}
+
+@test "promote errors when target scenario already exists" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  "$KB_SPIKE" run "$exp_id" --prompt "x" >/dev/null 2>&1
+
+  run "$KB_SPIKE" promote "$exp_id" --as basic    # basic.sh exists in setup
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"scenario already exists"* ]]
+}
+
+@test "promote rejects invalid scenario names" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  "$KB_SPIKE" run "$exp_id" --prompt "x" >/dev/null 2>&1
+
+  run "$KB_SPIKE" promote "$exp_id" --as "../escape"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must match"* ]]
+
+  run "$KB_SPIKE" promote "$exp_id" --as "with space"
+  [ "$status" -ne 0 ]
+}
+
+@test "promote requires --as" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  run "$KB_SPIKE" promote "$exp_id"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--as"* ]]
+}
+
+@test "promote errors when no _adhoc steps exist (default --from)" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  # No `run` was called → no _adhoc steps.
+  run "$KB_SPIKE" promote "$exp_id" --as derived
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no step files"* ]] || [[ "$output" == *"_adhoc"* ]]
+}
+
+@test "promote --from <scenario> reads scenario branch step files" {
+  exp_id="$("$KB_SPIKE" new --experiment smoke 2>/dev/null | tail -1)"
+  "$KB_SPIKE" run-scenario "$exp_id" basic >/dev/null 2>&1
+
+  run "$KB_SPIKE" promote "$exp_id" --as variant --from basic
+  [ "$status" -eq 0 ]
+  [ -f "$SPIKE_REPO_ROOT/experiments/smoke/scenarios/variant.sh" ]
+}
