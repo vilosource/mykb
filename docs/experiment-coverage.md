@@ -16,8 +16,9 @@ These ship with full `EXPERIMENT.md` + at least one `scenarios/*.sh` and have be
 | `kb_list` tool contract | [`experiments/kb-list/`](../experiments/kb-list/) | basic-list, lists-tags-suffix, no-match-no-fabrication | ✅ implemented |
 | `kb work checkpoint` (LLM-as-extractor) | [`experiments/work-checkpoint/`](../experiments/work-checkpoint/) | journal-extraction, knowledge-extraction, empty-conversation-no-fabrication | ✅ implemented |
 | Claude Code runtime | [`experiments/claude-code/`](../experiments/claude-code/) | bare-runs, hook-injects-handoff | ✅ implemented |
+| `tool-gating` hook | [`experiments/tool-gating/`](../experiments/tool-gating/) | blocks-write-to-brain, blocks-edit-by-pattern, allows-non-knowledge-writes, block-then-retry-via-kb-add, bash-bypass-known-gap | ✅ implemented (one known-fail documenting a security gap — see matrix) |
 
-**Total: 8 matrices, 29 scenarios.**
+**Total: 9 matrices, 34 scenarios** (including 1 documented known-fail).
 
 ## Scaffolded matrices (not-yet-implemented)
 
@@ -25,7 +26,6 @@ Each has an `EXPERIMENT.md` with intent + behavior matrix but no `scenarios/*.sh
 
 | Feature | Matrix | Why it needs L4 |
 |---|---|---|
-| `tool-gating` hook | [`experiments/tool-gating/`](../experiments/tool-gating/) | The hook prevents agents from corrupting brain JSONL by blocking Read/Write/Edit on knowledge files. A silent regression there means brain corruption — high-leverage anchor needed. |
 | `kb_work_*` tools (journal, state, note) | [`experiments/kb-work-tools/`](../experiments/kb-work-tools/) | These are the LLM-callable variants of `kb work journal` / `state` / `note`. They are the primary path Claude Code uses to capture session-derived knowledge into the workspace mid-session. Currently L1-only. |
 | `kb_add` tool | [`experiments/kb-add/`](../experiments/kb-add/) | LLM-callable tool to add facts/decisions/gotchas/patterns to an area. The "LLM mutates the brain" path. Currently L1-only. |
 | `kb_verify` tool | [`experiments/kb-verify/`](../experiments/kb-verify/) | LLM marks an entry as verified (provenance ratchet). Important for the trust-decay model. Currently L1-only. |
