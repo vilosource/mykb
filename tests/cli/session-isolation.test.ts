@@ -23,7 +23,18 @@ function runKb(
   args: string,
   sessionId?: string,
 ): { stdout: string; exitCode: number } {
-  const env: Record<string, string> = { ...process.env as Record<string, string>, MYKB_DIR: brainPath };
+  // Pin the child's tmpdir to brainPath so session files (which the
+  // production code writes to os.tmpdir() based on TMPDIR/TEMP/TMP)
+  // land inside this test's per-test directory. Without this, parallel
+  // test files that all use os.tmpdir() race on each other's afterEach
+  // cleanup of .mykb-session-* files.
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    MYKB_DIR: brainPath,
+    TMPDIR: brainPath,
+    TMP: brainPath,
+    TEMP: brainPath,
+  };
   if (sessionId) {
     env.KB_SESSION_ID = sessionId;
   } else {
@@ -52,16 +63,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Clean up any session files created during tests
-  const tmpDir = os.tmpdir();
-  const sessionFiles = fs.readdirSync(tmpDir).filter((f) => f.startsWith('.mykb-session-'));
-  for (const f of sessionFiles) {
-    try {
-      fs.unlinkSync(path.join(tmpDir, f));
-    } catch {
-      // ignore cleanup failures
-    }
-  }
+  // brainPath now also contains any session files (TMPDIR override).
+  // No need for unscoped tmpdir sweep — that caused cross-file races.
   fs.rmSync(brainPath, { recursive: true, force: true });
 });
 
@@ -161,7 +164,8 @@ describe('Session Isolation E2E (KB_SESSION_ID)', () => {
   it('session stop clears session file, .active unchanged', () => {
     const session = `test-${randomUUID()}`;
     const activeFile = path.join(brainPath, 'workspaces', '.active');
-    const sessionFile = path.join(os.tmpdir(), `.mykb-session-${session}`);
+    // Session file lands inside brainPath because runKb pins TMPDIR there.
+    const sessionFile = path.join(brainPath, `.mykb-session-${session}`);
 
     // Set .active via non-session command
     runKb('work start ws-alpha');

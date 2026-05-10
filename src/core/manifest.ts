@@ -11,6 +11,7 @@ export function regenerateManifest(brainPath: string): ManifestFile {
     summary: area.summary,
     owner: area.owner,
     updated: area.updated,
+    tags: area.tags ?? [],
   }));
 
   const manifest: ManifestFile = {
@@ -31,5 +32,16 @@ export function readManifest(brainPath: string): ManifestFile | null {
   }
 
   const content = fs.readFileSync(manifestPath, 'utf-8');
-  return JSON.parse(content) as ManifestFile;
+  const raw = JSON.parse(content) as { version: number; areas: Partial<ManifestArea>[] };
+  // Backward compat: older manifests don't have the tags field. Default
+  // to [] so the scorer doesn't choke on legacy brains. (Bug surfaced by
+  // experiments/area-scoring/.)
+  const areas: ManifestArea[] = raw.areas.map((a) => ({
+    id: a.id ?? '',
+    summary: a.summary ?? '',
+    owner: a.owner ?? '',
+    updated: a.updated ?? '',
+    tags: a.tags ?? [],
+  }));
+  return { version: raw.version, areas };
 }

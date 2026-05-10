@@ -434,47 +434,76 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
       throw new EntryValidationError(`Filename must not contain path separators: ${filename}`);
     }
 
-    // Check for duplicate filename in metadata
-    const existing = this.listArtifacts(workspaceId);
-    if (existing.some((a) => a.filename === filename)) {
-      throw new EntryValidationError(`Artifact '${filename}' already exists`);
-    }
-
-    // Ensure docs/ dir exists and write file
-    const docsDir = this.docsDir(workspaceId);
-    this.ensureDir(docsDir);
-    const filePath = path.join(docsDir, filename);
-    if (fs.existsSync(filePath)) {
-      // Register-only mode: file already on disk, just register metadata
-    } else {
-      // Exclusive create: prevents race condition where two processes both
-      // pass the duplicate check and try to write the same file
-      try {
-        fs.writeFileSync(filePath, content, { flag: 'wx' });
-      } catch (e: unknown) {
-        if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
-          throw new EntryValidationError(`Artifact '${filename}' already exists`);
-        }
-        throw e;
+    // Per-filename claim file. Atomic 'wx' creation serializes the entire
+    // add operation for this filename across processes, closing the race
+    // where two concurrent adds (one creating the file, one entering
+    // register-only mode after seeing it on disk) both append a metadata
+    // entry to artifacts.jsonl. Without it, both processes can pass the
+    // duplicate-metadata check, both can succeed at writing/seeing the
+    // file, and both can append metadata.
+    const wsDir = this.workspaceDir(workspaceId);
+    this.ensureDir(wsDir);
+    // Use a content-derived suffix to keep claim filenames inside the
+    // workspace dir without colliding with anything else there.
+    const claimPath = path.join(wsDir, `.artifact-claim-${filename}`);
+    let claimFd: number;
+    try {
+      claimFd = fs.openSync(claimPath, 'wx');
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new EntryValidationError(`Artifact '${filename}' already exists`);
       }
+      throw e;
     }
 
-    const id = generateId();
-    const now = new Date().toISOString();
-    const entry: ArtifactEntry = {
-      id,
-      filename,
-      type: options?.type ?? this.inferArtifactType(filename),
-      description: options?.description ?? this.extractDescriptionFromContent(content) ?? '',
-      tags: options?.tags ?? [],
-      areas: options?.areas ?? [],
-      created: now,
-      updated: now,
-    };
+    try {
+      // Check for duplicate filename in metadata. With the claim held,
+      // this check is now race-free: any in-flight competitor for the
+      // same filename is blocked at the openSync above.
+      const existing = this.listArtifacts(workspaceId);
+      if (existing.some((a) => a.filename === filename)) {
+        throw new EntryValidationError(`Artifact '${filename}' already exists`);
+      }
 
-    fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(entry) + '\n');
-    this.refreshArtifactSummaries(workspaceId);
-    return id;
+      // Ensure docs/ dir exists and write file
+      const docsDir = this.docsDir(workspaceId);
+      this.ensureDir(docsDir);
+      const filePath = path.join(docsDir, filename);
+      if (fs.existsSync(filePath)) {
+        // Register-only mode: file already on disk, just register metadata.
+        // Safe under the claim — no concurrent process can also be in this
+        // branch for the same filename.
+      } else {
+        try {
+          fs.writeFileSync(filePath, content, { flag: 'wx' });
+        } catch (e: unknown) {
+          if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+            throw new EntryValidationError(`Artifact '${filename}' already exists`);
+          }
+          throw e;
+        }
+      }
+
+      const id = generateId();
+      const now = new Date().toISOString();
+      const entry: ArtifactEntry = {
+        id,
+        filename,
+        type: options?.type ?? this.inferArtifactType(filename),
+        description: options?.description ?? this.extractDescriptionFromContent(content) ?? '',
+        tags: options?.tags ?? [],
+        areas: options?.areas ?? [],
+        created: now,
+        updated: now,
+      };
+
+      fs.appendFileSync(this.artifactsFile(workspaceId), JSON.stringify(entry) + '\n');
+      this.refreshArtifactSummaries(workspaceId);
+      return id;
+    } finally {
+      try { fs.closeSync(claimFd); } catch { /* already closed */ }
+      try { fs.unlinkSync(claimPath); } catch { /* already removed */ }
+    }
   }
 
   listArtifacts(workspaceId: string): ArtifactEntry[] {

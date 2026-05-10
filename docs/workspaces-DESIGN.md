@@ -175,7 +175,7 @@ When you start working on a workspace, mykb needs to load the right knowledge wi
 1. Read workspace JSON — get state, links, linked areas, document index
 2. Add linked areas to Tier 2's sticky set — scorer will prioritize these
 3. Inject workspace state as a system message: "You are working on: Stark Picking Dashboard. Phase: server-setup. Active: M2 app installation."
-4. Inject recent journal entries (last 3)
+4. Inject recent journal entries (last 2 days, max 20 — see `journal-auto-inject-DESIGN.md`)
 5. Inject document index: "Workspace documents: server-inventory.md (VM specs, IPs), deployment-plan.md (Rough deployment sequence)" — the AI can `read` any of them on demand
 
 **During the session:**
@@ -201,7 +201,7 @@ When you start working on a workspace, mykb needs to load the right knowledge wi
 ### What you DO get at session start
 
 - Workspace state (phase, active, blocked, next) — ~50 tokens
-- Last 3 journal entries — ~200 tokens
+- Recent journal entries (last 2 days, max 20) — typically ~150–500 tokens; cached after the first turn under Anthropic prompt caching, so amortized cost is ~10% of that
 - External links (Jira, repos, wiki) — ~100 tokens
 - Document index (filename + one-line description per doc) — ~50-100 tokens
 - Tier 2 scorer pre-seeded with linked area IDs — automatic injection starts immediately

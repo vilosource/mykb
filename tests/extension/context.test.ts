@@ -79,6 +79,64 @@ describe('Tier 2 — context handler', () => {
     });
   });
 
+  // Regression for the bug surfaced by experiments/area-scoring/scenarios/
+  // scoring-without-tools.sh: context.ts:45 hardcoded `tags: []` when
+  // building AreaMetadata from manifest, so the keyword scorer never
+  // matched on tag overlap even after the manifest schema was extended.
+  // The fix is `tags: a.tags`. Without this Layer-1 anchor, the only
+  // detection was the L4 scenario — and the scenario found it only
+  // after a long debug. This unit test makes the contract explicit.
+  it('builds AreaMetadata with tags from manifest, scoring tag overlap', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+
+      // Area with a UNIQUE tag word and a summary that does NOT overlap
+      // with the prompt — so scoring can ONLY succeed via tag overlap.
+      makeAreaDir(brainPath, 'tagged', 'A simple placeholder description', ['zynnoflux']);
+      // Hand-write a manifest including the tags field (writeManifest's
+      // shape after the bug-2 fix).
+      fs.writeFileSync(
+        path.join(brainPath, 'manifest.json'),
+        JSON.stringify({
+          version: 1,
+          areas: [
+            {
+              id: 'tagged',
+              summary: 'A simple placeholder description',
+              owner: 'test',
+              updated: '2026-03-15T00:00:00.000Z',
+              tags: ['zynnoflux'],
+            },
+          ],
+        }),
+      );
+
+      const store = MykbStore.open(brainPath);
+      try {
+        store.addFact('tagged', 'The fact text contains no tag word.');
+
+        const state = new SessionState();
+        // Signal contains ONLY the tag word — no overlap with summary.
+        state.addSignal('keyword', 'zynnoflux');
+
+        const handler = createContextHandler(store, state, brainPath);
+        const messages = [{ role: 'user', content: 'about zynnoflux' }];
+        const result = await handler(messages);
+
+        // The area got scored on tag overlap, entries got injected.
+        const injected = result.find(
+          (m: Record<string, string>) =>
+            m.role === 'system' && m.content.includes('<mykb-context>'),
+        );
+        expect(injected).toBeDefined();
+        expect(injected.content).toContain('## tagged');
+        expect(injected.content).toContain('The fact text contains no tag word');
+      } finally {
+        store.close();
+      }
+    });
+  });
+
   it('returns messages unchanged when no signals', async () => {
     await withTempBrain(async (brainPath) => {
       initBrain(brainPath);

@@ -47,6 +47,25 @@ describe('kb CLI', () => {
     });
   });
 
+  describe('version', () => {
+    // Regression for the bug where commander silently disabled
+    // --version because readVersionFromDisk found dist/package.json
+    // (Pi-extension manifest, no version field) first and returned
+    // undefined. Both --version and -V should return the package
+    // version string and exit 0.
+    it('prints version with --version', () => {
+      const { stdout, exitCode } = runKb('--version');
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    });
+
+    it('prints version with -V', () => {
+      const { stdout, exitCode } = runKb('-V');
+      expect(exitCode).toBe(0);
+      expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    });
+  });
+
   describe('init', () => {
     it('creates a brain directory', () => {
       const { stdout, exitCode } = runKb('init');
@@ -69,6 +88,75 @@ describe('kb CLI', () => {
       expect(exitCode).toBe(0);
       expect(stdout).toContain('networking');
       expect(fs.existsSync(path.join(brainPath, 'areas', 'networking', 'area.json'))).toBe(true);
+    });
+
+    it('init area updates manifest.json so the scorer sees the new area', () => {
+      // Regression for the bug surfaced by experiments/area-scoring/: areas
+      // created via `kb init area` were invisible to the context-hook scorer
+      // because manifest.json wasn't regenerated. The Pi extension reads
+      // manifest at every turn and falls back to listAreas only when the
+      // manifest is empty — so a stale manifest silently broke scoring for
+      // every newly-created area.
+      runKb('init');
+      runKb('init area networking "Networking" "Network knowledge"');
+      const manifestPath = path.join(brainPath, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
+        areas: { id: string; summary: string }[];
+      };
+      const ids = manifest.areas.map((a) => a.id);
+      expect(ids).toContain('networking');
+      const networking = manifest.areas.find((a) => a.id === 'networking');
+      expect(networking?.summary).toBe('Network knowledge');
+    });
+
+    it('init area --tags writes comma-separated tags to area.json', () => {
+      // Outside-in TDD driven by experiments/area-scoring/scenarios/
+      // init-area-tags.sh: the L4 scenario specifies that tags set via
+      // --tags must be discoverable. This unit-side anchor verifies the
+      // CLI parses --tags and threads it into createArea.
+      runKb('init');
+      const { exitCode } = runKb(
+        'init area widgets "Widgets" "Widget knowledge" --tags blue,calibration',
+      );
+      expect(exitCode).toBe(0);
+      const areaJson = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'areas', 'widgets', 'area.json'), 'utf-8'),
+      ) as { tags: string[] };
+      expect(areaJson.tags).toEqual(['blue', 'calibration']);
+    });
+
+    it('init area --tags propagates tags to manifest.json', () => {
+      // The scorer reads the manifest, not area.json directly. So tags
+      // must reach the manifest for keyword scoring to find them.
+      runKb('init');
+      runKb('init area widgets "Widgets" "Widget knowledge" --tags blue,calibration');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'manifest.json'), 'utf-8'),
+      ) as { areas: { id: string; tags?: string[] }[] };
+      const widgets = manifest.areas.find((a) => a.id === 'widgets');
+      expect(widgets?.tags).toEqual(['blue', 'calibration']);
+    });
+
+    it('init area --tags trims whitespace around comma-separated values', () => {
+      // Operator quality-of-life: '--tags a, b, c' should work the same
+      // as '--tags a,b,c'. Mirrors how 'kb add fact --tags' already
+      // behaves (cli.ts:103-104).
+      runKb('init');
+      runKb('init area widgets "Widgets" "Widget knowledge" --tags " blue ,  calibration "');
+      const areaJson = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'areas', 'widgets', 'area.json'), 'utf-8'),
+      ) as { tags: string[] };
+      expect(areaJson.tags).toEqual(['blue', 'calibration']);
+    });
+
+    it('init area without --tags writes an empty tags array', () => {
+      // Backward-compat: existing callers must keep working.
+      runKb('init');
+      runKb('init area widgets "Widgets" "Widget knowledge"');
+      const areaJson = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'areas', 'widgets', 'area.json'), 'utf-8'),
+      ) as { tags: string[] };
+      expect(areaJson.tags).toEqual([]);
     });
   });
 
@@ -355,11 +443,37 @@ describe('kb CLI', () => {
       expect(stdout).toContain('updated');
     });
 
+    it('area update propagates the new summary to manifest.json', () => {
+      // Manifest is the scorer's source of truth — a stale summary
+      // means the LLM scores this area against outdated keywords.
+      // cli.ts:409 calls regenerateManifest after updateAreaMetadata;
+      // this test would fail (silently, except via the L4 matrix) if
+      // a future edit removed that call.
+      runKb('area update test-area --summary "Updated summary"');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'manifest.json'), 'utf-8'),
+      ) as { areas: { id: string; summary: string }[] };
+      const area = manifest.areas.find((a) => a.id === 'test-area');
+      expect(area?.summary).toBe('Updated summary');
+    });
+
     it('deletes an area', () => {
       const { stdout, exitCode } = runKb('area delete test-area');
       expect(exitCode).toBe(0);
       expect(stdout).toContain('deleted');
       expect(fs.existsSync(path.join(brainPath, 'areas', 'test-area'))).toBe(false);
+    });
+
+    it('area delete removes the area from manifest.json', () => {
+      // If manifest still lists a deleted area, the scorer continues
+      // to consider it for keyword overlap and the kb_list / area-index
+      // surfaces still mention it. cli.ts:418 calls regenerateManifest
+      // after deleteArea; this test guards that.
+      runKb('area delete test-area');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(brainPath, 'manifest.json'), 'utf-8'),
+      ) as { areas: { id: string }[] };
+      expect(manifest.areas.find((a) => a.id === 'test-area')).toBeUndefined();
     });
   });
 

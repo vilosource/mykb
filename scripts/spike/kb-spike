@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+#
+# kb-spike — operator harness for Layer-4 mykb experiments.
+#
+# See docs/experimentation-METHODOLOGY.md for the model. The control
+# plane never calls the host's `kb`; only scenarios do, and only against
+# the per-experiment captured cli at <instance>/.e2e-build/cli/cli.js.
+#
+# Verbs (see kb-spike <verb> --help, or below):
+#   new            create a brain instance + capture build + write profile
+#   run-scenario   execute one scenario from experiments/<feature>/scenarios/
+#   show           print metadata + scenario pass/fail summary
+#   diff           git diff e2e/source..HEAD (or e2e/source..e2e/<scenario>-end)
+#   list           list active experiments under SPIKE_INSTANCES_DIR
+#   discard        remove instance + vfa profile (run record stays in repo)
+#
+# Environment:
+#   SPIKE_INSTANCES_DIR  default: $HOME/.mykb-experiments
+#   SPIKE_SPECIMEN       default: $HOME/.mykb
+#   SPIKE_REPO_ROOT      default: derived from script location
+#   VFA_HOME             default: $HOME/.vf-agents     (vfa profile dir)
+#   SPIKE_VFA_TIMEOUT    default: 120                  (per-step timeout)
+
+set -euo pipefail
+
+# Clear the operator's KB_SESSION_ID. Otherwise scenarios' `kb work
+# start` writes to a per-session file the Pi container can't see —
+# the brain mount only exposes the persistent .active file. This is the
+# canonical "kb-spike gotcha": never propagate the outer session id.
+unset KB_SESSION_ID
+
+# ── Locations ────────────────────────────────────────────────────
+
+_kb_spike_self_dir() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -L "$src" ]]; do
+    local d
+    d="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$d/$src"
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+
+KB_SPIKE_DIR="$(_kb_spike_self_dir)"
+KB_SPIKE_LIB="$KB_SPIKE_DIR/lib"
+SPIKE_REPO_ROOT="${SPIKE_REPO_ROOT:-$(cd "$KB_SPIKE_DIR/../.." && pwd)}"
+SPIKE_INSTANCES_DIR="${SPIKE_INSTANCES_DIR:-$HOME/.mykb-experiments}"
+SPIKE_SPECIMEN="${SPIKE_SPECIMEN:-$HOME/.mykb}"
+
+export SPIKE_REPO_ROOT SPIKE_INSTANCES_DIR SPIKE_SPECIMEN
+
+# Source every lib once at startup. Each defines functions only.
+# shellcheck source=lib/clone.sh
+source "$KB_SPIKE_LIB/clone.sh"
+# shellcheck source=lib/build-snapshot.sh
+source "$KB_SPIKE_LIB/build-snapshot.sh"
+# shellcheck source=lib/profile.sh
+source "$KB_SPIKE_LIB/profile.sh"
+# shellcheck source=lib/meta.sh
+source "$KB_SPIKE_LIB/meta.sh"
+# shellcheck source=lib/scenario.sh
+source "$KB_SPIKE_LIB/scenario.sh"
+
+# ── Helpers ──────────────────────────────────────────────────────
+
+_die() { echo "kb-spike: $*" >&2; exit 1; }
+
+_run_ts() { date -u +%Y%m%d-%H%M%S; }
+
+_require_experiment_dir() {
+  local exp="$1"
+  local dir="$SPIKE_REPO_ROOT/experiments/$exp"
+  [[ -d "$dir" ]] || _die "no experiment dir: $dir"
+  [[ -f "$dir/EXPERIMENT.md" ]] || _die "EXPERIMENT.md missing in $dir"
+}
+
+_require_instance() {
+  local exp_id="$1"
+  local instance="$SPIKE_INSTANCES_DIR/$exp_id"
+  [[ -d "$instance/.git" ]] || _die "instance not found: $instance"
+  printf '%s' "$instance"
+}
+
+# ── Verbs ────────────────────────────────────────────────────────
+
+cmd_new() {
+  local experiment="" intent="" runtime="pi"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --experiment) experiment="$2"; shift 2;;
+      --intent)     intent="$2";     shift 2;;
+      --runtime)    runtime="$2";    shift 2;;
+      *) _die "new: unknown arg: $1";;
+    esac
+  done
+  [[ -n "$experiment" ]] || _die "new: --experiment is required"
+  _require_experiment_dir "$experiment"
+
+  local exp_id="$experiment-$(_run_ts)"
+  local instance="$SPIKE_INSTANCES_DIR/$exp_id"
+
+  echo "kb-spike: cloning specimen $SPIKE_SPECIMEN -> $instance" >&2
+  spike_clone_specimen "$SPIKE_SPECIMEN" "$instance"
+
+  echo "kb-spike: capturing build from $SPIKE_REPO_ROOT" >&2
+  spike_capture_build "$SPIKE_REPO_ROOT" "$instance"
+
+  echo "kb-spike: rebuilding instance SQLite via captured cli" >&2
+  spike_rebuild_instance "$instance" >/dev/null
+
+  # claude-code runtime needs a workdir-seed (.claude/settings.json +
+  # hook scripts) mounted as /workspace inside the container.
+  if [[ "$runtime" == "claude-code" ]]; then
+    echo "kb-spike: seeding claude-code workdir from $SPIKE_REPO_ROOT/hooks/claude-code" >&2
+    spike_seed_workdir "$SPIKE_REPO_ROOT" "$instance"
+  fi
+
+  local profile_path
+  profile_path="$(spike_profile_path "$exp_id")"
+  echo "kb-spike: writing vfa profile $profile_path (runtime=$runtime)" >&2
+  SPIKE_RUNTIME="$runtime" spike_write_profile "$exp_id" "$instance"
+
+  local source_commit
+  source_commit="$(cd "$instance" && git rev-parse e2e/source)"
+
+  SPIKE_EXP_ID="$exp_id" \
+    SPIKE_EXPERIMENT="$experiment" \
+    SPIKE_INTENT="${intent:-(none)}" \
+    SPIKE_SPECIMEN="$SPIKE_SPECIMEN" \
+    SPIKE_SOURCE_COMMIT="$source_commit" \
+    SPIKE_PROFILE_PATH="$profile_path" \
+    SPIKE_RUNTIME="$runtime" \
+    spike_write_meta "$instance"
+
+  # Commit captured build + meta so e2e/source has a clean working tree
+  # for scenario branches to diff against.
+  (
+    cd "$instance"
+    git add -A
+    git commit -q -m "spike: instance setup ($exp_id)"
+    git tag -f e2e/source HEAD
+  )
+
+  printf '%s\n' "$exp_id"
+}
+
+cmd_run_scenario() {
+  [[ $# -eq 2 ]] || _die "run-scenario: usage: kb-spike run-scenario <exp_id> <scenario>"
+  # Pull the runtime out of the instance's meta so step.sh routes the
+  # right --provider. Default to pi for instances created before this
+  # field existed.
+  local runtime
+  runtime="$(spike_read_meta "$SPIKE_INSTANCES_DIR/$1" runtime 2>/dev/null || true)"
+  export SPIKE_RUNTIME="${runtime:-pi}"
+  spike_run_scenario "$1" "$2"
+}
+
+cmd_show() {
+  [[ $# -eq 1 ]] || _die "show: usage: kb-spike show <exp_id>"
+  local exp_id="$1" instance
+  instance="$(_require_instance "$exp_id")"
+
+  echo "exp_id:        $exp_id"
+  echo "experiment:    $(spike_read_meta "$instance" experiment)"
+  echo "intent:        $(spike_read_meta "$instance" intent)"
+  echo "specimen:      $(spike_read_meta "$instance" specimen)"
+  echo "source_commit: $(spike_read_meta "$instance" source_commit)"
+  echo "instance:      $instance"
+  echo "profile:       $(spike_read_meta "$instance" profile_path)"
+
+  if [[ -f "$instance/.e2e-build/build-meta.json" ]]; then
+    echo "build_commit:  $(jq -r .build_commit "$instance/.e2e-build/build-meta.json")"
+    echo "build_dirty:   $(jq -r .build_dirty  "$instance/.e2e-build/build-meta.json")"
+  fi
+
+  local experiment runs_dir
+  experiment="$(spike_read_meta "$instance" experiment)"
+  runs_dir="$SPIKE_REPO_ROOT/experiments/$experiment/runs/$exp_id"
+  if [[ -d "$runs_dir" ]]; then
+    echo
+    echo "scenarios:"
+    local f scenario pass total fail
+    for f in "$runs_dir"/*.json; do
+      [[ -f "$f" ]] || continue
+      scenario="$(jq -r .scenario "$f")"
+      pass="$(jq -r .pass "$f")"
+      total="$(jq -r '.assertions.total' "$f")"
+      fail="$(jq -r '.assertions.fail' "$f")"
+      printf '  %-30s pass=%-5s assertions=%d fail=%d\n' "$scenario" "$pass" "$total" "$fail"
+    done
+  else
+    echo
+    echo "scenarios:    (none run yet)"
+  fi
+}
+
+cmd_diff() {
+  [[ $# -ge 1 && $# -le 2 ]] || _die "diff: usage: kb-spike diff <exp_id> [scenario]"
+  local exp_id="$1" scenario="${2:-}" instance
+  instance="$(_require_instance "$exp_id")"
+  cd "$instance"
+  if [[ -n "$scenario" ]]; then
+    git diff "e2e/source" "e2e/$scenario-end"
+  else
+    git diff "e2e/source" HEAD
+  fi
+}
+
+cmd_list() {
+  [[ -d "$SPIKE_INSTANCES_DIR" ]] || { echo "(no experiments)"; return 0; }
+  local d exp_id meta
+  shopt -s nullglob
+  for d in "$SPIKE_INSTANCES_DIR"/*/; do
+    exp_id="$(basename "$d")"
+    meta="$d/.e2e-meta.json"
+    if [[ -f "$meta" ]]; then
+      printf '%-50s  %s\n' "$exp_id" "$(jq -r '.intent // "(no intent)"' "$meta")"
+    else
+      printf '%-50s  (no meta)\n' "$exp_id"
+    fi
+  done
+  shopt -u nullglob
+}
+
+cmd_discard() {
+  [[ $# -eq 1 ]] || _die "discard: usage: kb-spike discard <exp_id>"
+  local exp_id="$1"
+  local instance="$SPIKE_INSTANCES_DIR/$exp_id"
+  [[ -d "$instance" ]] || _die "no such instance: $instance"
+  echo "kb-spike: removing profile e2e-$exp_id" >&2
+  spike_remove_profile "$exp_id"
+  echo "kb-spike: removing instance $instance" >&2
+  rm -rf "$instance"
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────
+
+usage() {
+  cat <<EOF
+Usage: kb-spike <verb> [args...]
+
+Verbs:
+  new --experiment <name> [--intent "..."] [--runtime <pi|claude-code>]
+                                              Create a brain instance.
+  run-scenario <exp_id> <scenario>            Run one scenario.
+  show <exp_id>                               Print metadata + results.
+  diff <exp_id> [scenario]                    Show mutations from e2e/source.
+  list                                        List active experiments.
+  discard <exp_id>                            Remove instance + profile.
+
+Environment:
+  SPIKE_INSTANCES_DIR (default: \$HOME/.mykb-experiments)
+  SPIKE_SPECIMEN      (default: \$HOME/.mykb)
+  SPIKE_REPO_ROOT     (default: derived from script location)
+  VFA_HOME            (default: \$HOME/.vf-agents)
+  SPIKE_VFA_TIMEOUT   (default: 120)
+
+See docs/experimentation-METHODOLOGY.md for the full model.
+EOF
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then usage; exit 1; fi
+  local verb="$1"; shift
+  case "$verb" in
+    new)            cmd_new "$@";;
+    run-scenario)   cmd_run_scenario "$@";;
+    show)           cmd_show "$@";;
+    diff)           cmd_diff "$@";;
+    list)           cmd_list "$@";;
+    discard)        cmd_discard "$@";;
+    -h|--help|help) usage;;
+    *) _die "unknown verb: $verb (run 'kb-spike --help')";;
+  esac
+}
+
+main "$@"

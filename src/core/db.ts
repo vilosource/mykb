@@ -86,6 +86,8 @@ CREATE INDEX IF NOT EXISTS idx_prov_date ON entries(prov_date);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(id, text, tags, area);
 
+CREATE VIRTUAL TABLE IF NOT EXISTS areas_fts USING fts5(area_id, summary, tags);
+
 CREATE TABLE IF NOT EXISTS areas (
   id      TEXT PRIMARY KEY,
   name    TEXT NOT NULL,
@@ -102,13 +104,22 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `;
 
+function normalizeTags(raw: string | null): string[] {
+  if (!raw) return [];
+  const parsed = JSON.parse(raw);
+  if (Array.isArray(parsed)) return parsed as string[];
+  // Legacy format: comma-separated string (e.g. "dns,dnsmasq,ansible")
+  if (typeof parsed === 'string') return parsed.split(',').map((t) => t.trim()).filter(Boolean);
+  return [];
+}
+
 function rowToEntry(row: EntryRow): KnowledgeEntry {
   const entry: Record<string, unknown> = {
     id: row.id,
     area: row.area,
     type: row.type,
     text: row.text,
-    tags: row.tags ? (JSON.parse(row.tags) as string[]) : [],
+    tags: normalizeTags(row.tags),
     provenance: {
       status: row.prov_status ?? 'unverified',
       ...(row.prov_date ? { date: row.prov_date } : {}),
@@ -144,7 +155,7 @@ function rowToArea(row: AreaRow): AreaMetadata {
     name: row.name,
     summary: row.summary ?? '',
     owner: row.owner ?? '',
-    tags: row.tags ? (JSON.parse(row.tags) as string[]) : [],
+    tags: normalizeTags(row.tags),
     created: row.created,
     updated: row.updated,
   };
@@ -285,16 +296,66 @@ export function sanitizeFtsQuery(query: string): string {
 export function searchEntries(db: Database.Database, query: string, excludeZone?: Zone): KnowledgeEntry[] {
   const sanitized = sanitizeFtsQuery(query);
   if (!sanitized) return [];
-  const ftsRows = db
+
+  // Direct entry-text/-tag hits, ranked.
+  const entryFtsRows = db
     .prepare(`SELECT id, rank FROM entries_fts WHERE entries_fts MATCH @query ORDER BY rank`)
     .all({ query: sanitized }) as FtsMatchRow[];
 
-  if (ftsRows.length === 0) return [];
+  // Area-metadata hits — entries from any area whose summary or
+  // area-level tags match. These are appended after the directly
+  // ranked entry hits; we don't have a meaningful cross-index BM25
+  // score, so the policy is "direct matches first, then siblings."
+  const areaFtsRows = db
+    .prepare(
+      `SELECT area_id FROM areas_fts WHERE areas_fts MATCH @query ORDER BY rank`,
+    )
+    .all({ query: sanitized }) as { area_id: string }[];
 
-  const ids = ftsRows.map((r) => r.id);
-  const placeholders = ids.map(() => '?').join(',');
+  if (entryFtsRows.length === 0 && areaFtsRows.length === 0) return [];
+
+  // Collect entry ids: direct matches keep their order; then add any
+  // entries belonging to area-FTS-matched areas (ordered by area-rank,
+  // then entry id for determinism).
+  const orderedIds: string[] = [];
+  const seen = new Set<string>();
+  for (const r of entryFtsRows) {
+    if (!seen.has(r.id)) {
+      orderedIds.push(r.id);
+      seen.add(r.id);
+    }
+  }
+
+  if (areaFtsRows.length > 0) {
+    const areaPlaceholders = areaFtsRows.map(() => '?').join(',');
+    const areaIds = areaFtsRows.map((r) => r.area_id);
+    const siblingRows = db
+      .prepare(
+        `SELECT id, area FROM entries WHERE area IN (${areaPlaceholders}) ORDER BY area, id`,
+      )
+      .all(...areaIds) as { id: string; area: string }[];
+    // Group entry ids by area-id, then emit in area-rank order.
+    const byArea = new Map<string, string[]>();
+    for (const row of siblingRows) {
+      if (!byArea.has(row.area)) byArea.set(row.area, []);
+      byArea.get(row.area)!.push(row.id);
+    }
+    for (const aid of areaIds) {
+      const ids = byArea.get(aid) ?? [];
+      for (const id of ids) {
+        if (!seen.has(id)) {
+          orderedIds.push(id);
+          seen.add(id);
+        }
+      }
+    }
+  }
+
+  if (orderedIds.length === 0) return [];
+
+  const placeholders = orderedIds.map(() => '?').join(',');
   let entrySql = `SELECT * FROM entries WHERE id IN (${placeholders})`;
-  const entryParams: unknown[] = [...ids];
+  const entryParams: unknown[] = [...orderedIds];
   if (excludeZone) {
     entrySql += ' AND zone != ?';
     entryParams.push(excludeZone);
@@ -303,15 +364,14 @@ export function searchEntries(db: Database.Database, query: string, excludeZone?
     .prepare(entrySql)
     .all(...entryParams) as EntryRow[];
 
-  // Preserve FTS5 rank ordering
   const entryMap = new Map<string, EntryRow>();
   for (const row of entryRows) {
     entryMap.set(row.id, row);
   }
 
   const results: KnowledgeEntry[] = [];
-  for (const ftsRow of ftsRows) {
-    const row = entryMap.get(ftsRow.id);
+  for (const id of orderedIds) {
+    const row = entryMap.get(id);
     if (row) results.push(rowToEntry(row));
   }
 
@@ -319,20 +379,42 @@ export function searchEntries(db: Database.Database, query: string, excludeZone?
 }
 
 export function upsertArea(db: Database.Database, area: AreaMetadata): void {
-  db.prepare(
+  const tagsJson = JSON.stringify(area.tags);
+  const upsertSql = db.prepare(
     `
     INSERT OR REPLACE INTO areas (id, name, summary, owner, tags, created, updated)
     VALUES (@id, @name, @summary, @owner, @tags, @created, @updated)
   `,
-  ).run({
-    id: area.id,
-    name: area.name,
-    summary: area.summary ?? null,
-    owner: area.owner ?? null,
-    tags: JSON.stringify(area.tags),
-    created: area.created,
-    updated: area.updated,
+  );
+  const deleteFts = db.prepare('DELETE FROM areas_fts WHERE area_id = @id');
+  const insertFts = db.prepare(
+    'INSERT INTO areas_fts (area_id, summary, tags) VALUES (@id, @summary, @tags)',
+  );
+
+  // Tags column for FTS uses a space-joined form so each tag tokenizes
+  // as its own term — matches how entries_fts stores tags JSON (the
+  // tokenizer splits on punctuation including quotes/brackets).
+  const tagsForFts = (area.tags ?? []).join(' ');
+
+  const transaction = db.transaction(() => {
+    upsertSql.run({
+      id: area.id,
+      name: area.name,
+      summary: area.summary ?? null,
+      owner: area.owner ?? null,
+      tags: tagsJson,
+      created: area.created,
+      updated: area.updated,
+    });
+    deleteFts.run({ id: area.id });
+    insertFts.run({
+      id: area.id,
+      summary: area.summary ?? '',
+      tags: tagsForFts,
+    });
   });
+
+  transaction();
 }
 
 export function listAreas(db: Database.Database): AreaMetadata[] {

@@ -63,3 +63,61 @@ describe('readManifest', () => {
     });
   });
 });
+
+// Regression for experiments/area-scoring/: ManifestArea didn't include
+// tags, so '--tags' on 'kb add fact' couldn't drive keyword scoring even
+// when the manifest was fresh. context.ts:42-49 builds AreaMetadata with
+// tags: [] hardcoded; the fix is to thread tags from area.json through
+// the manifest into the AreaMetadata builder.
+describe('manifest tags', () => {
+  it('regenerateManifest populates tags from area metadata', async () => {
+    await withTempBrain(async (brainPath) => {
+      createArea(brainPath, 'networking', 'Networking', 'Network knowledge', [
+        'dns',
+        'routing',
+      ]);
+      regenerateManifest(brainPath);
+
+      const manifest = readManifest(brainPath);
+      expect(manifest).not.toBeNull();
+      const networking = manifest!.areas.find((a) => a.id === 'networking');
+      expect(networking?.tags).toEqual(['dns', 'routing']);
+    });
+  });
+
+  it('regenerateManifest defaults to empty tags when area has none', async () => {
+    await withTempBrain(async (brainPath) => {
+      createArea(brainPath, 'untagged', 'Untagged', 'No tags here');
+      regenerateManifest(brainPath);
+
+      const manifest = readManifest(brainPath);
+      const untagged = manifest!.areas.find((a) => a.id === 'untagged');
+      expect(untagged?.tags).toEqual([]);
+    });
+  });
+
+  it('readManifest defaults missing tags field to [] (backward compat)', async () => {
+    await withTempBrain(async (brainPath) => {
+      // Hand-write a manifest in the old (pre-tags) format. Existing
+      // brains in the wild have manifests without the tags field; the
+      // reader must not blow up on them.
+      const manifestPath = path.join(brainPath, 'manifest.json');
+      fs.writeFileSync(
+        manifestPath,
+        JSON.stringify(
+          {
+            version: 1,
+            areas: [{ id: 'legacy', summary: 'Legacy', owner: '', updated: '2026-01-01' }],
+          },
+          null,
+          2,
+        ),
+      );
+
+      const manifest = readManifest(brainPath);
+      expect(manifest).not.toBeNull();
+      const legacy = manifest!.areas.find((a) => a.id === 'legacy');
+      expect(legacy?.tags).toEqual([]);
+    });
+  });
+});

@@ -67,7 +67,11 @@ export function renderAreaIndex(areas: AreaMetadata[]): string {
 
   const lines: string[] = [];
   for (const area of areas) {
-    lines.push(`- **${area.id}**: ${area.summary}`);
+    let line = `- **${area.id}**: ${area.summary}`;
+    if (area.tags && area.tags.length > 0) {
+      line += ` [tags: ${area.tags.join(', ')}]`;
+    }
+    lines.push(line);
   }
   return lines.join('\n') + '\n';
 }

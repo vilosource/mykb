@@ -55,6 +55,14 @@ export default function (pi: ExtensionAPI): void {
   // Tier 3 — /kb command for on-demand area loading
   pi.registerCommand('kb', createKbCommandHandler(store, state));
 
-  // Register tools (with workspace storage for workspace tools)
-  registerTools(pi, store, brainPath, wsStorage);
+  // Register tools (with workspace storage for workspace tools).
+  //
+  // MYKB_DISABLE_TOOLS=1 is honored by the kb-spike harness's scoring-
+  // isolation scenarios: it suppresses tool registration so the LLM
+  // cannot fall back to kb_search/kb_list/kb_load — proving the scorer/
+  // system-prompt path delivers area knowledge on its own. See
+  // experiments/area-scoring/scenarios/scoring-without-tools.sh.
+  if (process.env.MYKB_DISABLE_TOOLS !== '1') {
+    registerTools(pi, store, brainPath, wsStorage);
+  }
 }

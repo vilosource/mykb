@@ -10,6 +10,7 @@ import { initBrain } from '../core/init.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
 import { MykbStore } from '../core/knowledge-store.js';
 import { createArea, listAreas, readAreaMetadata, updateAreaMetadata, deleteArea } from '../core/area.js';
+import { regenerateManifest } from '../core/manifest.js';
 import { renderMarkdown, renderJson, renderAreaIndex, renderWorkspace } from '../core/render.js';
 import { FileSystemWorkspaceStorage } from '../core/workspace.js';
 import type { WorkspaceState } from '../core/types.js';
@@ -88,9 +89,23 @@ initCmd.action(() => {
 initCmd
   .command('area <id> <name> [summary]')
   .description('Create a new area')
-  .action((id: string, name: string, summary?: string) => {
+  .option('--tags <tags>', 'Comma-separated tags (used by the scorer for keyword overlap)')
+  .action((id: string, name: string, summary: string | undefined, opts: { tags?: string }) => {
     const bp = requireBrain();
-    createArea(bp, id, name, summary ?? '');
+    const tags = opts.tags
+      ? opts.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0)
+      : [];
+    createArea(bp, id, name, summary ?? '', tags);
+    // Manifest is the scorer's source of truth — regen so the new area
+    // (and its tags) are visible to context-hook auto-injection. (Bugs
+    // surfaced by experiments/area-scoring/: areas without a manifest
+    // entry never got scored, so their facts didn't auto-load; and tags
+    // not in the manifest schema couldn't drive keyword overlap even
+    // when the manifest was fresh.)
+    regenerateManifest(bp);
     console.log(`Area '${id}' created`);
   });
 
@@ -407,6 +422,7 @@ areaCmd
     if (opts.summary) updates.summary = opts.summary;
     if (opts.owner) updates.owner = opts.owner;
     updateAreaMetadata(bp, id, updates);
+    regenerateManifest(bp);
     console.log(`updated area '${id}'`);
   });
 
@@ -416,6 +432,7 @@ areaCmd
   .action((id: string) => {
     const bp = requireBrain();
     deleteArea(bp, id);
+    regenerateManifest(bp);
     console.log(`deleted area '${id}'`);
   });
 
