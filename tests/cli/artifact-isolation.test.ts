@@ -14,14 +14,27 @@ beforeAll(() => {
   execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'pipe' });
 });
 
+// Pin the spawned CLI's tmpdir to brainPath so session files (which the
+// production code writes to os.tmpdir() via TMPDIR/TEMP/TMP) land inside
+// this test's per-test directory. Without this, parallel test files that
+// all use os.tmpdir() race on each other's afterEach cleanup of
+// .mykb-session-* files.
+function envForChild(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    ...(process.env as Record<string, string>),
+    MYKB_DIR: brainPath,
+    TMPDIR: brainPath,
+    TMP: brainPath,
+    TEMP: brainPath,
+    ...extra,
+  };
+}
+
 function runKb(
   args: string,
   opts?: { stdin?: string; sessionId?: string },
 ): { stdout: string; exitCode: number } {
-  const env: Record<string, string> = { ...(process.env as Record<string, string>), MYKB_DIR: brainPath };
-  if (opts?.sessionId) {
-    env.KB_SESSION_ID = opts.sessionId;
-  }
+  const env = envForChild(opts?.sessionId ? { KB_SESSION_ID: opts.sessionId } : {});
   try {
     const stdout = execSync(`node ${CLI_PATH} ${args}`, {
       cwd: PROJECT_ROOT,
@@ -42,10 +55,7 @@ function runKbAsync(
   opts?: { stdin?: string; sessionId?: string },
 ): Promise<{ stdout: string; exitCode: number }> {
   return new Promise((resolve) => {
-    const env: Record<string, string> = { ...(process.env as Record<string, string>), MYKB_DIR: brainPath };
-    if (opts?.sessionId) {
-      env.KB_SESSION_ID = opts.sessionId;
-    }
+    const env = envForChild(opts?.sessionId ? { KB_SESSION_ID: opts.sessionId } : {});
     const child = exec(`node ${CLI_PATH} ${args}`, {
       cwd: PROJECT_ROOT,
       env,
@@ -72,11 +82,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Clean up session files
-  const tmpDir = os.tmpdir();
-  for (const f of fs.readdirSync(tmpDir).filter((f) => f.startsWith('.mykb-session-'))) {
-    try { fs.unlinkSync(path.join(tmpDir, f)); } catch { /* ignore */ }
-  }
+  // brainPath now also contains any session files (TMPDIR override).
+  // No need for unscoped tmpdir sweep — that caused cross-file races.
   fs.rmSync(brainPath, { recursive: true, force: true });
 });
 
