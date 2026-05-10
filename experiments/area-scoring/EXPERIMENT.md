@@ -20,11 +20,28 @@ This is the first experiment of what should grow into a fuller area-scoring matr
 
 ## Behavior matrix
 
-| Stimulus | Expected behavior | Scenario |
-|----------|-------------------|----------|
-| Prompt's keywords match an area's summary/tags | LLM cites a fact from that area (proves: area loaded → entries reached the system prompt → LLM used them) | `keyword-match-loads` |
-| Prompt is about an unrelated topic; the area exists but its keywords don't match | LLM answer does NOT contain the area's marker fact | `off-topic-no-leak` |
-| No active workspace; area exists with matching keywords | Area still loads via keyword scoring (linking is a boost, not a gate) | `no-workspace-still-loads` |
+| Stimulus | Expected behavior | Scenario | Status |
+|----------|-------------------|----------|--------|
+| Prompt's keywords match an area's summary/tags | LLM cites a fact from that area (proves: area loaded → entries reached the system prompt → LLM used them) | `keyword-match-loads` | ✅ |
+| Prompt is about an unrelated topic; the area exists but its keywords don't match | LLM answer does NOT contain the area's marker fact | `off-topic-no-leak` | ✅ |
+| No active workspace; area exists with matching keywords | Area still loads via keyword scoring (linking is a boost, not a gate) | `no-workspace-still-loads` | ✅ |
+| Area created via `kb init area --tags`; manifest has tags | Manifest regenerates; scorer sees tags | `init-area-tags` | ✅ |
+| `kb_list` output includes the `[tags: ...]` suffix | LLM disambiguates by tag | `kb-list-shows-tags` | ✅ |
+| With `MYKB_DISABLE_TOOLS=1`, the system-prompt area-index reaches the LLM | LLM cites area-id from `<mykb-areas>` despite no tools | `scoring-without-tools` | ✅ |
+| Multi-step + persisted signals: per-turn `<mykb-context>` delivers entry-level marker fact with all tool fallbacks forbidden | LLM cites the marker; injection delivered via cycle-8 file-backed `SessionState` | `scoring-isolated` | ✅ |
+| Two areas score equally on keyword overlap; only one is linked to the active workspace | The linked area wins via workspace-boost; LLM cites that area's fact | `workspace-boost` | 🚧 not yet implemented |
+| An area loaded in turn N gets a sticky-boost in turn N+1; equally-scoring competitor doesn't | LLM cites the sticky area's fact in turn N+1 over a freshly-matched competitor | `sticky-area-persistence` | 🚧 not yet implemented |
+| Many areas score; total entries exceed the 2000-token budget | Highest-scoring areas keep their entries; lower-scoring areas drop entries first; widget marker stays in (because widget area scored highest) | `token-budget-eviction` | 🚧 not yet implemented |
+| LLM uses Read on a file whose path tokens overlap an area's tags | `FilePathSignalProvider` emits a signal; that area scores; subsequent turn injects | `file-path-signal` | 🚧 not yet implemented |
+
+The first 7 rows are **implemented and RED-proven** — see [`scenarios/`](scenarios/). The last 4 rows are tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md) as scaffolded sub-behaviors. Each becomes a `scenarios/<name>.sh` when implemented.
+
+### Sub-behavior implementation notes (for the 4 scaffolded rows)
+
+- **`workspace-boost`**: prepare two synthetic areas with identical keyword-overlap-to-prompt; link one to the active workspace via `kb work create --areas`. The boosted area should win injection. Marker pinned to the boosted area's fact only.
+- **`sticky-area-persistence`**: two-step. Step 1 establishes signals matching area X (loads it → marked sticky). Step 2 asks a prompt that scores X and a fresh competitor Y equally on keywords; assert X wins because of sticky boost. Uses cycle-8 file-backed SessionState (automatic).
+- **`token-budget-eviction`**: prepare 5+ synthetic areas with distinct keyword-overlap signals; the marker fact lives only in the highest-scoring area. Total entry text exceeds 2000 tokens. Assert the marker reaches the LLM (top area kept) AND a low-scoring area's marker does NOT (evicted).
+- **`file-path-signal`**: prepare an area whose tags match a path component (e.g. tags=`["frobnicator"]`, file path `/tmp/frobnicator/spec.md`). Step 1 has the LLM Read that file (legit Pi runtime tool fires). Step 2 asks a domain question; the file-path signal should have scored the area; assert injection.
 
 ## Notes
 

@@ -1,0 +1,61 @@
+# Experiment coverage
+
+> **Purpose:** central index of every Layer-4 matrix in this repo plus the gaps where features ship without an L4 anchor. Read this before declaring "all experiments done." The list is **never** finished — new features should land with their matrix and update this index.
+
+## Implemented matrices
+
+These ship with full `EXPERIMENT.md` + at least one `scenarios/*.sh` and have been RED→GREEN-proven against a real Pi runtime.
+
+| Feature | Matrix | Scenarios | Status |
+|---|---|---|---|
+| `kb work handoff` | [`experiments/handoff/`](../experiments/handoff/) | continuity, overwrite, clear, no-active-workspace | ✅ implemented |
+| Per-turn journal injection | [`experiments/journal-auto-inject/`](../experiments/journal-auto-inject/) | resume-continuity, stale-filter, mid-session-append, no-active-workspace | ✅ implemented |
+| Area scoring (v1 + v2 + v3) | [`experiments/area-scoring/`](../experiments/area-scoring/) | keyword-match-loads, off-topic-no-leak, no-workspace-still-loads, init-area-tags, kb-list-shows-tags, scoring-without-tools, scoring-isolated | ✅ implemented (matrix has documented sub-behavior gaps — see below) |
+| `kb_search` tool + FTS area-metadata | [`experiments/kb-search/`](../experiments/kb-search/) | tool-direct-text-match, tool-finds-via-area-metadata, tool-no-match-no-fabrication | ✅ implemented |
+| `kb_load` tool contract | [`experiments/kb-load/`](../experiments/kb-load/) | basic-load, discover-via-area-index, unknown-area-no-fabrication | ✅ implemented |
+| `kb_list` tool contract | [`experiments/kb-list/`](../experiments/kb-list/) | basic-list, lists-tags-suffix, no-match-no-fabrication | ✅ implemented |
+| `kb work checkpoint` (LLM-as-extractor) | [`experiments/work-checkpoint/`](../experiments/work-checkpoint/) | journal-extraction, knowledge-extraction, empty-conversation-no-fabrication | ✅ implemented |
+| Claude Code runtime | [`experiments/claude-code/`](../experiments/claude-code/) | bare-runs, hook-injects-handoff | ✅ implemented |
+
+**Total: 8 matrices, 29 scenarios.**
+
+## Scaffolded matrices (not-yet-implemented)
+
+Each has an `EXPERIMENT.md` with intent + behavior matrix but no `scenarios/*.sh` yet. The methodology requires every Layer-4 feature to have at least one scenario; these are **violations of that rule** that will be closed by future cycles.
+
+| Feature | Matrix | Why it needs L4 |
+|---|---|---|
+| `tool-gating` hook | [`experiments/tool-gating/`](../experiments/tool-gating/) | The hook prevents agents from corrupting brain JSONL by blocking Read/Write/Edit on knowledge files. A silent regression there means brain corruption — high-leverage anchor needed. |
+| `kb_work_*` tools (journal, state, note) | [`experiments/kb-work-tools/`](../experiments/kb-work-tools/) | These are the LLM-callable variants of `kb work journal` / `state` / `note`. They are the primary path Claude Code uses to capture session-derived knowledge into the workspace mid-session. Currently L1-only. |
+| `kb_add` tool | [`experiments/kb-add/`](../experiments/kb-add/) | LLM-callable tool to add facts/decisions/gotchas/patterns to an area. The "LLM mutates the brain" path. Currently L1-only. |
+| `kb_verify` tool | [`experiments/kb-verify/`](../experiments/kb-verify/) | LLM marks an entry as verified (provenance ratchet). Important for the trust-decay model. Currently L1-only. |
+| `/kb` slash command | [`experiments/kb-command/`](../experiments/kb-command/) | On-demand area loading via Pi's slash-command surface. Currently L1-only. |
+
+## Sub-behavior gaps in implemented matrices
+
+These belong to existing matrices but the matrix's behavior table flags them as not-yet-covered.
+
+| Matrix | Gap | Notes |
+|---|---|---|
+| `area-scoring` | Workspace-boost vs keyword-strength interaction | When an area is linked to the active workspace, scoring boosts it. Test: prompt that matches area X by keyword AND area Y by workspace boost — does the right one win at injection time? |
+| `area-scoring` | Sticky-area persistence across turns | An area loaded in turn N gets a sticky-boost in turn N+1. Now testable since file-backed `SessionState` (cycle 8) persists `loadedAreas`. |
+| `area-scoring` | Token-budget eviction order | When the 2000-token budget is exceeded, which areas keep their entries? Probably highest-scoring — but unverified end-to-end. |
+| `area-scoring` | `FilePathSignalProvider` paths | Read/Write/Edit on a file path emits a signal; that signal scores areas via path-tokenization. End-to-end test would Read a file whose path tokens match an area's tags, then assert injection. |
+
+## Cross-cutting properties without an L4 home
+
+- **Compaction interaction:** when Pi auto-compacts a long session, does the kb extension survive? Specifically: do persisted signals / loaded-areas survive the compaction event? No scenario.
+- **Multi-turn injection coherence:** turn N injects area A; turn N+1 injects area B. Does the LLM see both, just B, or get confused? No scenario.
+- **Concurrent session contention:** two `KB_SESSION_ID`s writing to the same workspace. Atomicity is L1-tested for individual operations; the multi-process pattern at L4 isn't.
+
+## Maintenance
+
+- **Adding a feature**: ship its matrix at the same time. Add a row to the **Implemented matrices** table.
+- **Closing a scaffold**: implement scenarios; move the row from **Scaffolded** to **Implemented**. Delete from **Sub-behavior gaps** if it covered one.
+- **Discovering a gap**: add a row to **Scaffolded matrices** AND scaffold an `EXPERIMENT.md` so the doc stays linkable.
+
+## Why this doc exists
+
+The methodology says experiments accumulate as the regression suite. That's correct as a steady-state goal; in practice, **shipping an L4 matrix lags shipping the feature**. Without an explicit gap list, "feature X has no L4" silently fades from collective awareness — until a scenario surfaces a latent bug (cycle 8 was the load-bearing example: 3-layer context-event bug latent for the entire history of mykb because every prior matrix had a fallback path that masked it).
+
+Tracking gaps is cheap. The cost of a gap that goes unnoticed for months is high.
