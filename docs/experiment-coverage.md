@@ -1,6 +1,8 @@
 # Experiment coverage
 
 > **Purpose:** central index of every Layer-4 matrix in this repo plus the gaps where features ship without an L4 anchor. Read this before declaring "all experiments done." The list is **never** finished — new features should land with their matrix and update this index.
+>
+> **Companion:** [`findings-log.md`](findings-log.md) — every latent production bug AND methodology gotcha surfaced while building these matrices. Read both when assessing mykb's correctness state.
 
 ## Implemented matrices
 
