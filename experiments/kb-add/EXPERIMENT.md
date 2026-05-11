@@ -5,7 +5,16 @@
 
 ## Status
 
-🚧 **Scaffolded — scenarios not yet implemented.** Tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md).
+✅ **Implemented.** All four scenarios GREEN against a real Pi runtime, each RED-proven:
+
+| Scenario | GREEN | RED-proof (mutated build) |
+|----------|-------|---------------------------|
+| `add-fact` | 13/13 | `MykbStore.addEntry` skips `persistEntry` (`return entry.id`) → `facts.jsonl` never written (3 file-state assertions flip; `kb_add` still "fires") |
+| `add-decision-with-why` | 15/15 | `MykbStore.addDecision` drops the `if (options?.why) … = options.why` line → decision lands but `why` doesn't (the rationale-marker assertion flips; the decision-marker one still passes) |
+| `add-then-search-roundtrip` | 16/16 | same `addEntry` no-op → step-1 write never happens, so step-2 `kb_search` returns nothing and the LLM can't surface the entry's content (`9.5`/`newton`/`torque` — none of it is in the prompt). Preferred unambiguous retrieve-side mutation: make `kb-search.ts` `execute` return "No matches." unconditionally. |
+| `add-to-unknown-area` | 14/14 | same `addEntry` no-op → the area is never auto-created, so `area.json` / `facts.jsonl` / `manifest.json` never appear (6 assertions flip). Cleaner policy-isolating mutation: make `appendEntry`'s auto-create branch `throw` instead of `createArea`. |
+
+Tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md).
 
 ## Intent
 

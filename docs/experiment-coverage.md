@@ -20,8 +20,9 @@ These ship with full `EXPERIMENT.md` + at least one `scenarios/*.sh` and have be
 | Claude Code runtime | [`experiments/claude-code/`](../experiments/claude-code/) | bare-runs, hook-injects-handoff | ✅ implemented |
 | `tool-gating` hook | [`experiments/tool-gating/`](../experiments/tool-gating/) | blocks-write-to-brain, blocks-edit-by-pattern, allows-non-knowledge-writes, block-then-retry-via-kb-add, bash-bypass-known-gap | ✅ implemented (one known-fail documenting a security gap — see matrix) |
 | `kb_work_*` tools (journal, state, note) | [`experiments/kb-work-tools/`](../experiments/kb-work-tools/) | journal-tool, state-tool, note-tool, no-active-workspace | ✅ implemented — the streaming workspace-mutation path (per-tool); `state-tool` is the cross-step `<mykb-workspace>` re-injection anchor |
+| `kb_add` tool | [`experiments/kb-add/`](../experiments/kb-add/) | add-fact, add-decision-with-why, add-then-search-roundtrip, add-to-unknown-area | ✅ implemented — the LLM-mutates-area path (per-entry-type); `add-then-search-roundtrip` is the write → FTS index → retrieve closed-loop anchor; `add-to-unknown-area` pins the auto-create policy |
 
-**Total: 10 matrices, 42 scenarios** (including 1 documented known-fail).
+**Total: 11 matrices, 46 scenarios** (including 1 documented known-fail).
 
 ## Scaffolded matrices (not-yet-implemented)
 
@@ -29,7 +30,6 @@ Each has an `EXPERIMENT.md` with intent + behavior matrix but no `scenarios/*.sh
 
 | Feature | Matrix | Why it needs L4 |
 |---|---|---|
-| `kb_add` tool | [`experiments/kb-add/`](../experiments/kb-add/) | LLM-callable tool to add facts/decisions/gotchas/patterns to an area. The "LLM mutates the brain" path. Currently L1-only. |
 | `kb_verify` tool | [`experiments/kb-verify/`](../experiments/kb-verify/) | LLM marks an entry as verified (provenance ratchet). Important for the trust-decay model. Currently L1-only. |
 | `/kb` slash command | [`experiments/kb-command/`](../experiments/kb-command/) | On-demand area loading via Pi's slash-command surface. Currently L1-only. |
 
