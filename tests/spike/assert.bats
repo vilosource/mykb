@@ -145,6 +145,25 @@ teardown() {
   [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
 }
 
+@test "assert_no_branch_diff_match passes when nothing matches the pattern" {
+  (cd "$INSTANCE" && mkdir -p workspaces/foo && echo x > workspaces/foo/journal.jsonl \
+     && git add -A && git commit -q -m j)
+  assert_no_branch_diff_match 'areas/.+/facts\.jsonl$'
+  [ "$SPIKE_ASSERT_PASS" -eq 1 ]
+}
+
+@test "assert_no_branch_diff_match fails when a diffed path matches" {
+  (cd "$INSTANCE" && mkdir -p workspaces/foo && echo x > workspaces/foo/journal.jsonl \
+     && git add -A && git commit -q -m j)
+  assert_no_branch_diff_match 'workspaces/.+/(journal|notes)\.jsonl$'
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
+@test "assert_no_branch_diff_match passes on an otherwise-empty diff" {
+  assert_no_branch_diff_match 'workspaces/.+/workspace\.json$'
+  [ "$SPIKE_ASSERT_PASS" -eq 1 ]
+}
+
 # ── State file (JSON via jq) ─────────────────────────────────────
 
 @test "assert_state_file_field passes for matching value" {
@@ -182,6 +201,23 @@ teardown() {
   assert_jsonl_count "missing.jsonl" 0
   [ "$SPIKE_ASSERT_PASS" -eq 1 ]
   assert_jsonl_count "missing.jsonl" 1
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
+@test "assert_jsonl_contains passes when some line contains the substring" {
+  printf '{"text":"alpha"}\n{"text":"MARKER_42 here"}\n' > "$INSTANCE/foo.jsonl"
+  assert_jsonl_contains "foo.jsonl" "MARKER_42"
+  [ "$SPIKE_ASSERT_PASS" -eq 1 ]
+}
+
+@test "assert_jsonl_contains fails when no line contains the substring" {
+  printf '{"text":"alpha"}\n{"text":"beta"}\n' > "$INSTANCE/foo.jsonl"
+  assert_jsonl_contains "foo.jsonl" "MARKER_42"
+  [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
+}
+
+@test "assert_jsonl_contains fails when the file is missing" {
+  assert_jsonl_contains "missing.jsonl" "MARKER_42"
   [ "$SPIKE_ASSERT_FAIL" -eq 1 ]
 }
 

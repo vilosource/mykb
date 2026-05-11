@@ -234,9 +234,13 @@ assert_llm_contains_all A B C         # all
 assert_step_status_is "<step>" "<status>"   # e.g. "completed"
 
 # State assertions — what changed on disk in the brain instance
-assert_branch_diff_empty                            # no mutations from source tag
+assert_branch_diff_empty                            # no mutations at all (rarely usable —
+                                                    #   the harness commits .e2e-steps/ and the
+                                                    #   cleared workspaces/.active onto every branch)
 assert_branch_diff_contains "<path>"                # specific file mutated
 assert_branch_diff_not_contains "<path>"            # specific file untouched
+assert_no_branch_diff_match "<regex>"               # nothing of this shape mutated (the working
+                                                    #   negative companion to ...diff_contains)
 assert_state_file_field "<path>" "<jq-query>" "..."  # JSON field equality
 assert_jsonl_count "<path>" <n>                     # line count
 assert_jsonl_contains "<path>" "<substr>"           # some line contains substr

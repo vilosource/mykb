@@ -163,6 +163,26 @@ assert_branch_diff_not_contains() {
   fi
 }
 
+# Asserts no path in the scenario's branch diff matches the given
+# extended-regex. The working negative companion to
+# assert_branch_diff_contains: use it for "nothing of this shape was
+# written" when the exact path isn't known up front (e.g. a negative
+# scenario proving a tool made no workspace/area mutation). Prefer this
+# over assert_branch_diff_empty for that case — the harness commits its
+# own .e2e-steps/ files and the cleared workspaces/.active onto every
+# scenario branch, so the diff is never literally empty.
+assert_no_branch_diff_match() {
+  local pattern="$1" diff
+  diff="$(_spike_branch_diff_paths || true)"
+  if grep -qE -- "$pattern" <<<"$diff"; then
+    local hits
+    hits="$(grep -E -- "$pattern" <<<"$diff" | tr '\n' ',' | sed 's/,$//')"
+    _spike_assert_fail "assert_no_branch_diff_match \"$pattern\": matched: ${hits}"
+  else
+    _spike_assert_pass
+  fi
+}
+
 # ── State file (JSON, queried via jq) ────────────────────────────
 
 assert_state_file_field() {
