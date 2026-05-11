@@ -14,10 +14,14 @@ beforeAll(() => {
 });
 
 function runKb(args: string, opts?: { stdin?: string }): { stdout: string; exitCode: number } {
+  // Strip an ambient KB_SESSION_ID so the CLI uses the temp brain's .active
+  // pointer rather than a process-wide /tmp session file.
+  const env: NodeJS.ProcessEnv = { ...process.env, MYKB_DIR: brainPath };
+  delete env.KB_SESSION_ID;
   try {
     const stdout = execSync(`node ${CLI_PATH} ${args}`, {
       cwd: PROJECT_ROOT,
-      env: { ...process.env, MYKB_DIR: brainPath },
+      env,
       encoding: 'utf-8',
       timeout: 10000,
       input: opts?.stdin,
