@@ -126,6 +126,37 @@ describe('registerSessionHooks', () => {
     });
   });
 
+  // The data blocks (<mykb-areas>/<mykb-workspace>) tell the LLM nothing about
+  // when to consult the brain — without an operating-instructions block the
+  // model answers "what did we work on" by running ls/find. This anchors that
+  // the <mykb-protocol> block is present and names the key entry points.
+  it('before_agent_start injects the operating-protocol block', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      const store = MykbStore.open(brainPath);
+      const state = new SessionState();
+      const pi = createMockPi();
+      const wsStorage = new FileSystemWorkspaceStorage(brainPath);
+
+      registerSessionHooks(pi, store, state, brainPath, wsStorage);
+
+      const handler = pi.handlers.get('before_agent_start')!;
+      const result = (await handler({ systemPrompt: 'base prompt' }, {})) as BeforeAgentStartResult;
+
+      expect(result.systemPrompt).toContain('<mykb-protocol>');
+      expect(result.systemPrompt).toContain('</mykb-protocol>');
+      // Names the cold-start digest and forbids the filesystem fallback.
+      expect(result.systemPrompt).toContain('kb recent');
+      expect(result.systemPrompt).toMatch(/do not.*\bls\b.*\bfind\b/i);
+      // Comes before the data blocks it refers to.
+      expect(result.systemPrompt.indexOf('<mykb-protocol>')).toBeLessThan(
+        result.systemPrompt.indexOf('<mykb-areas>'),
+      );
+
+      store.close();
+    });
+  });
+
   it('before_agent_start without active workspace does not inject workspace context', async () => {
     await withTempBrain(async (brainPath) => {
       initBrain(brainPath);
