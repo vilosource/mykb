@@ -30,15 +30,14 @@ This is the first experiment of what should grow into a fuller area-scoring matr
 | With `MYKB_DISABLE_TOOLS=1`, the system-prompt area-index reaches the LLM | LLM cites area-id from `<mykb-areas>` despite no tools | `scoring-without-tools` | ✅ |
 | Multi-step + persisted signals: per-turn `<mykb-context>` delivers entry-level marker fact with all tool fallbacks forbidden | LLM cites the marker; injection delivered via cycle-8 file-backed `SessionState` | `scoring-isolated` | ✅ |
 | A persisted `file_path` signal (the kind `createToolCallHandler` emits on a Read/Write/Edit) carries a path whose tokens overlap an area's summary | `FilePathSignalProvider`/`scoreAreas` split the path on `/` and `.`; the area scores; its marker fact reaches the LLM via per-turn context injection, no tool fallbacks | `file-path-signal` | ✅ |
-| Two areas score equally on keyword overlap; only one is linked to the active workspace | The linked area wins via workspace-boost; LLM cites that area's fact | `workspace-boost` | 🚧 not yet implemented |
+| An area linked to the active workspace; the turn's signals match a *different* (unlinked) area on keywords | The linked area still scores via `WORKSPACE_BOOST` (+0.5) despite zero keyword overlap, so its marker fact reaches the LLM via per-turn context injection; without the boost it wouldn't | `workspace-boost` | ✅ |
 | An area loaded in turn N gets a sticky-boost in turn N+1; equally-scoring competitor doesn't | LLM cites the sticky area's fact in turn N+1 over a freshly-matched competitor | `sticky-area-persistence` | 🚧 not yet implemented |
 | Many areas score; total entries exceed the 2000-token budget | Highest-scoring areas keep their entries; lower-scoring areas drop entries first; widget marker stays in (because widget area scored highest) | `token-budget-eviction` | 🚧 not yet implemented |
 
-The first 8 rows are **implemented and RED-proven** — see [`scenarios/`](scenarios/). The last 3 rows are tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md) as scaffolded sub-behaviors. Each becomes a `scenarios/<name>.sh` when implemented.
+The first 9 rows are **implemented and RED-proven** — see [`scenarios/`](scenarios/). The last 2 rows are tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md) as scaffolded sub-behaviors. Each becomes a `scenarios/<name>.sh` when implemented.
 
-### Sub-behavior implementation notes (for the 3 scaffolded rows)
+### Sub-behavior implementation notes (for the 2 scaffolded rows)
 
-- **`workspace-boost`**: prepare two synthetic areas with identical keyword-overlap-to-prompt; link one to the active workspace via `kb work create --areas`. The boosted area should win injection. Marker pinned to the boosted area's fact only.
 - **`sticky-area-persistence`**: two-step. Step 1 establishes signals matching area X (loads it → marked sticky). Step 2 asks a prompt that scores X and a fresh competitor Y equally on keywords; assert X wins because of sticky boost. Uses cycle-8 file-backed SessionState (automatic).
 - **`token-budget-eviction`**: prepare 5+ synthetic areas with distinct keyword-overlap signals; the marker fact lives only in the highest-scoring area. Total entry text exceeds 2000 tokens. Assert the marker reaches the LLM (top area kept) AND a low-scoring area's marker does NOT (evicted).
 
