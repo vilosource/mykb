@@ -197,6 +197,24 @@ assert_jsonl_count() {
   fi
 }
 
+# Asserts a JSONL file (in the brain instance) has a line containing the
+# given literal substring. Used to check that an LLM-emitted entry (the
+# marker text it was told to record via kb_work_journal/kb_work_note/...)
+# actually landed on disk.
+assert_jsonl_contains() {
+  local rel_path="$1" needle="$2"
+  local abs="$SPIKE_INSTANCE/$rel_path"
+  if [[ ! -f "$abs" ]]; then
+    _spike_assert_fail "assert_jsonl_contains \"$rel_path\": file missing"
+    return 0
+  fi
+  if grep -qF -- "$needle" "$abs"; then
+    _spike_assert_pass
+  else
+    _spike_assert_fail "assert_jsonl_contains \"$rel_path\": \"$needle\" not found"
+  fi
+}
+
 # ── Tool-call detection (via vfa logs --raw) ─────────────────────
 
 # Asserts the most recent step did NOT invoke any vfa tool whose name

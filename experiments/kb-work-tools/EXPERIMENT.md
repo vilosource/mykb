@@ -5,7 +5,7 @@
 
 ## Status
 
-🚧 **Scaffolded — scenarios not yet implemented.** Tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md).
+🟡 **Partially implemented.** `journal-tool` ✅ (GREEN + RED-proven against a real Pi runtime — RED-proof: disabling `wsStorage.appendJournal` leaves `journal.jsonl` untouched). `state-tool`, `note-tool`, `no-active-workspace` 🚧 not yet implemented. Tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md).
 
 ## Intent
 

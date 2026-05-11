@@ -28,7 +28,7 @@ Each has an `EXPERIMENT.md` with intent + behavior matrix but no `scenarios/*.sh
 
 | Feature | Matrix | Why it needs L4 |
 |---|---|---|
-| `kb_work_*` tools (journal, state, note) | [`experiments/kb-work-tools/`](../experiments/kb-work-tools/) | These are the LLM-callable variants of `kb work journal` / `state` / `note`. They are the primary path Claude Code uses to capture session-derived knowledge into the workspace mid-session. Currently L1-only. |
+| `kb_work_*` tools (journal, state, note) | [`experiments/kb-work-tools/`](../experiments/kb-work-tools/) | The LLM-callable variants of `kb work journal` / `state` / `note` — the primary path Claude Code uses to capture session-derived knowledge mid-session. **Partially implemented**: `journal-tool` ✅ (GREEN + RED-proven); `state-tool`, `note-tool`, `no-active-workspace` 🚧. |
 | `kb_add` tool | [`experiments/kb-add/`](../experiments/kb-add/) | LLM-callable tool to add facts/decisions/gotchas/patterns to an area. The "LLM mutates the brain" path. Currently L1-only. |
 | `kb_verify` tool | [`experiments/kb-verify/`](../experiments/kb-verify/) | LLM marks an entry as verified (provenance ratchet). Important for the trust-decay model. Currently L1-only. |
 | `/kb` slash command | [`experiments/kb-command/`](../experiments/kb-command/) | On-demand area loading via Pi's slash-command surface. Currently L1-only. |

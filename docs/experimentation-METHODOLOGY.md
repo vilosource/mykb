@@ -239,6 +239,7 @@ assert_branch_diff_contains "<path>"                # specific file mutated
 assert_branch_diff_not_contains "<path>"            # specific file untouched
 assert_state_file_field "<path>" "<jq-query>" "..."  # JSON field equality
 assert_jsonl_count "<path>" <n>                     # line count
+assert_jsonl_contains "<path>" "<substr>"           # some line contains substr
 
 # Counter / event assertions — for hook-counting features
 assert_counter "<name>" <expected>
