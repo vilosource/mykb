@@ -12,7 +12,7 @@ These ship with full `EXPERIMENT.md` + at least one `scenarios/*.sh` and have be
 |---|---|---|---|
 | `kb work handoff` | [`experiments/handoff/`](../experiments/handoff/) | continuity, overwrite, clear, no-active-workspace | ✅ implemented |
 | Per-turn journal injection | [`experiments/journal-auto-inject/`](../experiments/journal-auto-inject/) | resume-continuity, stale-filter, mid-session-append, no-active-workspace | ✅ implemented |
-| Area scoring (v1 + v2 + v3) | [`experiments/area-scoring/`](../experiments/area-scoring/) | keyword-match-loads, off-topic-no-leak, no-workspace-still-loads, init-area-tags, kb-list-shows-tags, scoring-without-tools, scoring-isolated | ✅ implemented (matrix has documented sub-behavior gaps — see below) |
+| Area scoring (v1 + v2 + v3) | [`experiments/area-scoring/`](../experiments/area-scoring/) | keyword-match-loads, off-topic-no-leak, no-workspace-still-loads, init-area-tags, kb-list-shows-tags, scoring-without-tools, scoring-isolated, file-path-signal | ✅ implemented (matrix has documented sub-behavior gaps — see below) |
 | `kb_search` tool + FTS area-metadata | [`experiments/kb-search/`](../experiments/kb-search/) | tool-direct-text-match, tool-finds-via-area-metadata, tool-no-match-no-fabrication | ✅ implemented |
 | `kb_load` tool contract | [`experiments/kb-load/`](../experiments/kb-load/) | basic-load, discover-via-area-index, unknown-area-no-fabrication | ✅ implemented |
 | `kb_list` tool contract | [`experiments/kb-list/`](../experiments/kb-list/) | basic-list, lists-tags-suffix, no-match-no-fabrication | ✅ implemented |
@@ -20,7 +20,7 @@ These ship with full `EXPERIMENT.md` + at least one `scenarios/*.sh` and have be
 | Claude Code runtime | [`experiments/claude-code/`](../experiments/claude-code/) | bare-runs, hook-injects-handoff | ✅ implemented |
 | `tool-gating` hook | [`experiments/tool-gating/`](../experiments/tool-gating/) | blocks-write-to-brain, blocks-edit-by-pattern, allows-non-knowledge-writes, block-then-retry-via-kb-add, bash-bypass-known-gap | ✅ implemented (one known-fail documenting a security gap — see matrix) |
 
-**Total: 9 matrices, 34 scenarios** (including 1 documented known-fail).
+**Total: 9 matrices, 35 scenarios** (including 1 documented known-fail).
 
 ## Scaffolded matrices (not-yet-implemented)
 
@@ -42,7 +42,6 @@ These belong to existing matrices but the matrix's behavior table flags them as 
 | `area-scoring` | Workspace-boost vs keyword-strength interaction | When an area is linked to the active workspace, scoring boosts it. Test: prompt that matches area X by keyword AND area Y by workspace boost — does the right one win at injection time? |
 | `area-scoring` | Sticky-area persistence across turns | An area loaded in turn N gets a sticky-boost in turn N+1. Now testable since file-backed `SessionState` (cycle 8) persists `loadedAreas`. |
 | `area-scoring` | Token-budget eviction order | When the 2000-token budget is exceeded, which areas keep their entries? Probably highest-scoring — but unverified end-to-end. |
-| `area-scoring` | `FilePathSignalProvider` paths | Read/Write/Edit on a file path emits a signal; that signal scores areas via path-tokenization. End-to-end test would Read a file whose path tokens match an area's tags, then assert injection. |
 
 ## Cross-cutting properties without an L4 home
 
