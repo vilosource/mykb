@@ -1,20 +1,31 @@
 import type { SessionState } from '../state.js';
 
+// Pi's extension event bus delivers these shapes (see
+// @mariozechner/pi-coding-agent core/extensions/types.d.ts):
+//   tool_call   -> { type, toolCallId, toolName, input }
+//   tool_result -> { type, toolCallId, input, content: TextContent[], isError, toolName }
+//   input       -> { type, text, source }
+// Pi names its built-in file tools in lowercase ('read'/'write'/'edit') and
+// puts the file path under input.path; we also accept the Claude-style
+// `file_path` / `filePath` aliases (matching tool-gating.ts).
+
 type ToolCallEvent = {
-  tool: string;
-  params: Record<string, unknown>;
+  toolName?: string;
+  input?: Record<string, unknown>;
 };
 
+type TextContentBlock = { type: 'text'; text: string };
+
 type ToolResultEvent = {
-  tool: string;
-  output: string;
+  toolName?: string;
+  content?: Array<{ type: string; text?: string }>;
 };
 
 type InputEvent = {
-  text: string;
+  text?: string;
 };
 
-const FILE_PATH_TOOLS = new Set(['Read', 'Write', 'Edit']);
+const FILE_PATH_TOOLS = new Set(['read', 'write', 'edit']);
 const MAX_OUTPUT_LENGTH = 500;
 
 /**
@@ -25,9 +36,10 @@ export function createToolCallHandler(
 ): (...args: unknown[]) => Promise<unknown> {
   return async (...args: unknown[]): Promise<unknown> => {
     const event = args[0] as ToolCallEvent;
-    if (!FILE_PATH_TOOLS.has(event.tool)) return;
+    if (!FILE_PATH_TOOLS.has((event.toolName ?? '').toLowerCase())) return;
 
-    const filePath = event.params.file_path;
+    const input = event.input ?? {};
+    const filePath = input.file_path ?? input.path ?? input.filePath;
     if (typeof filePath === 'string' && filePath.length > 0) {
       state.addSignal('file_path', filePath);
     }
@@ -42,13 +54,18 @@ export function createToolResultHandler(
 ): (...args: unknown[]) => Promise<unknown> {
   return async (...args: unknown[]): Promise<unknown> => {
     const event = args[0] as ToolResultEvent;
-    if (!event.output || event.output.length === 0) return;
+    const text = (event.content ?? [])
+      .filter(
+        (block): block is TextContentBlock =>
+          block?.type === 'text' && typeof block.text === 'string',
+      )
+      .map((block) => block.text)
+      .join(' ')
+      .trim();
+    if (text.length === 0) return;
 
     // Truncate long output to first MAX_OUTPUT_LENGTH chars
-    const truncated =
-      event.output.length > MAX_OUTPUT_LENGTH
-        ? event.output.slice(0, MAX_OUTPUT_LENGTH)
-        : event.output;
+    const truncated = text.length > MAX_OUTPUT_LENGTH ? text.slice(0, MAX_OUTPUT_LENGTH) : text;
 
     state.addSignal('keyword', truncated);
   };
