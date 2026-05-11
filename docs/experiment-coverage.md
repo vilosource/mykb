@@ -10,8 +10,8 @@ These ship with full `EXPERIMENT.md` + at least one `scenarios/*.sh` and have be
 
 | Feature | Matrix | Scenarios | Status |
 |---|---|---|---|
-| `kb work handoff` | [`experiments/handoff/`](../experiments/handoff/) | continuity, overwrite, clear, no-active-workspace | ⚠️ **currently RED** — scenarios depend on the `<mykb-workspace>` block, which the Pi container no longer sees ([issue #5](https://github.com/vilosource/mykb/issues/5)) |
-| Per-turn journal injection | [`experiments/journal-auto-inject/`](../experiments/journal-auto-inject/) | resume-continuity, stale-filter, mid-session-append, no-active-workspace | ⚠️ **currently RED** — same `<mykb-workspace>`-not-visible regression ([issue #5](https://github.com/vilosource/mykb/issues/5)) |
+| `kb work handoff` | [`experiments/handoff/`](../experiments/handoff/) | continuity, overwrite, clear, no-active-workspace | ✅ implemented — `<mykb-workspace>`-not-visible regression ([issue #5](https://github.com/vilosource/mykb/issues/5)) fixed in commit `ab2c22b`; `continuity` re-verified GREEN post-fix |
+| Per-turn journal injection | [`experiments/journal-auto-inject/`](../experiments/journal-auto-inject/) | resume-continuity, stale-filter, mid-session-append, no-active-workspace | ✅ implemented — same regression fixed (`ab2c22b`); `resume-continuity` re-verified GREEN post-fix |
 | Area scoring (v1 + v2 + v3) | [`experiments/area-scoring/`](../experiments/area-scoring/) | keyword-match-loads, off-topic-no-leak, no-workspace-still-loads, init-area-tags, kb-list-shows-tags, scoring-without-tools, scoring-isolated, file-path-signal | ✅ implemented (matrix has documented sub-behavior gaps — see below) |
 | `kb_search` tool + FTS area-metadata | [`experiments/kb-search/`](../experiments/kb-search/) | tool-direct-text-match, tool-finds-via-area-metadata, tool-no-match-no-fabrication | ✅ implemented |
 | `kb_load` tool contract | [`experiments/kb-load/`](../experiments/kb-load/) | basic-load, discover-via-area-index, unknown-area-no-fabrication | ✅ implemented |
