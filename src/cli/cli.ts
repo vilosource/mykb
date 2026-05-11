@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,8 @@ import { save, saveAndPush } from '../core/save.js';
 import { hydrateDatabase } from '../core/hydrate.js';
 import { createDatabase } from '../core/db.js';
 import { getAreaStats } from '../core/db.js';
+import { getRecentActivity, renderRecent } from '../core/recent.js';
+import { cutoffForDays } from '../core/journal-window.js';
 import { Zone, ProvenanceStatus } from '../core/types.js';
 import type {
   AreaContext,
@@ -319,6 +321,73 @@ program
       }
     });
   });
+
+// --- recent ---
+program
+  .command('recent')
+  .description('Show recently-worked-on workspaces and areas (default: last 2 days)')
+  .option('-d, --days <n>', 'Window in days', '2')
+  .option('--since <date>', 'Window start (ISO date or timestamp); overrides --days')
+  .option('--all', 'Ignore the window — show every workspace/area ranked by recency')
+  .option('--git', 'Also show the brain git log over the window')
+  .option('--full', 'Show up to 5 journal lines per workspace instead of one')
+  .option('--json', 'Output the structured digest as JSON')
+  .action(
+    (opts: {
+      days?: string;
+      since?: string;
+      all?: boolean;
+      git?: boolean;
+      full?: boolean;
+      json?: boolean;
+    }) => {
+      const bp = requireBrain();
+      const ws = new FileSystemWorkspaceStorage(bp);
+      const days = opts.days ? Number.parseInt(opts.days, 10) : 2;
+      if (Number.isNaN(days) || days <= 0) {
+        process.stderr.write('Error: --days must be a positive integer.\n');
+        process.exit(1);
+      }
+      const activity = getRecentActivity(bp, ws, {
+        since: opts.since,
+        days,
+        all: opts.all === true,
+      });
+      if (opts.json) {
+        console.log(JSON.stringify(activity, null, 2));
+        return;
+      }
+      process.stdout.write(renderRecent(activity, { full: opts.full === true }));
+      if (opts.git) {
+        const gitSince = opts.since ?? cutoffForDays(days);
+        let log: string | null;
+        try {
+          log = execFileSync(
+            'git',
+            [
+              '-C',
+              bp,
+              'log',
+              '--since',
+              gitSince,
+              '--date=format:%Y-%m-%d %H:%M',
+              '--pretty=format:%cd  %s',
+            ],
+            { encoding: 'utf-8' },
+          ).trim();
+        } catch {
+          log = null; // not a git repo, or git unavailable
+        }
+        const body =
+          log === null
+            ? '  (brain is not a git repo, or git is unavailable)'
+            : log === ''
+              ? '  (no commits in window)'
+              : log.replace(/^/gm, '  ');
+        process.stdout.write(`\nGIT LOG (${path.basename(bp)})\n${body}\n`);
+      }
+    },
+  );
 
 // --- save ---
 program
