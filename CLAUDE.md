@@ -23,6 +23,13 @@ The `npm link` survives `git pull`; only re-link if something explicitly broke i
 
 This convention is recorded as kb decision `bvWRQwIk` on the `mykb` area and as a Claude Code memory entry (`feedback_kb_vs_kb_develop_split.md`).
 
+## Branches
+
+- **`develop`** — the integration branch and GitHub's default. CI (`.github/workflows/ci.yml`) runs on pushes/PRs to `develop`. There is no `main` on the remote; `develop` is it. The `~/GitHub/mykb-stable` worktree tracks `develop` (it backs the global `kb` binary — see above).
+- **Feature branches** — short-lived, branched off `develop`, merged back via fast-forward (or PR for larger changes), then **deleted** (local *and* remote). The `~/GitHub/mykb` worktree is the dev checkout — it sits on whatever feature branch is currently in flight (it does *not* track `develop`, since `develop` is checked out in `mykb-stable` and a branch can only be checked out in one worktree). `kb-develop` runs from `~/GitHub/mykb/dist/`.
+- **Live design branches** — `feature/v2-design-docs` and `research/v2-harness-memory` carry v2 design/research work not yet on `develop`; leave them alone.
+- The pre-2026-05-11 leftover `feature/*` / `phase-w*` / `docs/*` branches (whose work was already integrated into `develop`) were deleted on 2026-05-11 as part of GH issue #3. Don't recreate the pattern: delete a feature branch once its work lands on `develop`.
+
 ## Development Rules
 
 **Read `docs/development-MANIFESTO.md` before writing any code.** It is mandatory and governs:
