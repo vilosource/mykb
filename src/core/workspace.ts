@@ -198,16 +198,22 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   }
 
   getActiveWorkspaceId(): string | null {
-    // Tier 1: per-session isolation
+    // Tier 1: per-session pointer. A session with KB_SESSION_ID set that
+    // has run `kb work start` reads its own session file — isolated from
+    // other sessions sharing this brain. If that file is present it is
+    // authoritative (even if empty -> null).
     const sf = this.sessionFile();
-    if (sf) {
-      if (fs.existsSync(sf)) {
-        return fs.readFileSync(sf, 'utf-8').trim() || null;
-      }
-      return null; // session active but no workspace set yet
+    if (sf && fs.existsSync(sf)) {
+      return fs.readFileSync(sf, 'utf-8').trim() || null;
     }
 
-    // Tier 2: global fallback
+    // Tier 2: global pointer (~/.mykb/workspaces/.active). Reached either
+    // when KB_SESSION_ID is unset (plain CLI), or when it is set but the
+    // session hasn't run `kb work start` yet — in which case the session
+    // inherits whatever workspace is currently active, until it sets its
+    // own. (This also lets a kb-spike Pi container, whose prepare() wrote
+    // `.active`, see the active workspace despite having KB_SESSION_ID
+    // set — see GH issue #5 / kb gotcha gpn7eWFl.)
     const file = this.activeFile();
     if (!fs.existsSync(file)) return null;
     return fs.readFileSync(file, 'utf-8').trim() || null;

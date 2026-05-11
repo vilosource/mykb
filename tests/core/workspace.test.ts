@@ -953,13 +953,42 @@ describe('FileSystemWorkspaceStorage Session Isolation (KB_SESSION_ID)', () => {
     });
   });
 
-  it('getActiveWorkspaceId with KB_SESSION_ID set + no session file returns null', async () => {
+  it('getActiveWorkspaceId with KB_SESSION_ID set + no session file + no .active returns null', async () => {
     await withTempBrain(async (brainPath) => {
       const sessionId = `test-${randomUUID()}`;
       process.env.KB_SESSION_ID = sessionId;
 
       const storage = new FileSystemWorkspaceStorage(brainPath);
       expect(storage.getActiveWorkspaceId()).toBeNull();
+    });
+  });
+
+  it('getActiveWorkspaceId with KB_SESSION_ID set + no session file falls back to .active', async () => {
+    await withTempBrain(async (brainPath) => {
+      const sessionId = `test-${randomUUID()}`;
+      process.env.KB_SESSION_ID = sessionId;
+      const sessionFile = path.join(os.tmpdir(), `.mykb-session-${sessionId}`);
+
+      try {
+        const storage = new FileSystemWorkspaceStorage(brainPath);
+        storage.createWorkspace('global-ws', 'Global');
+        // .active is the global pointer; a session that hasn't run `kb work
+        // start` (no session file) inherits it. See docs/session-isolation-DESIGN.md
+        // "Update 2026-05-11" / GH issue #5.
+        const activeFile = path.join(brainPath, 'workspaces', '.active');
+        fs.writeFileSync(activeFile, 'global-ws\n');
+
+        expect(storage.getActiveWorkspaceId()).toBe('global-ws');
+
+        // Once this session sets its own workspace, the session file wins
+        // and `.active` is untouched.
+        storage.createWorkspace('session-ws', 'Session');
+        storage.setActiveWorkspaceId('session-ws');
+        expect(storage.getActiveWorkspaceId()).toBe('session-ws');
+        expect(fs.readFileSync(activeFile, 'utf-8').trim()).toBe('global-ws');
+      } finally {
+        if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
+      }
     });
   });
 

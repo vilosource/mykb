@@ -68,13 +68,18 @@ This file contains only the active workspace ID for that session. It is:
 
 ```
 1. Session file: <tmpdir>/.mykb-session-<KB_SESSION_ID>
-   └─ Per-session isolation. Written by `kb work start` during the session.
-      Used when KB_SESSION_ID is in the environment.
-      Returns null if session file doesn't exist yet (agent hasn't set workspace).
+   └─ Per-session pointer. Written by `kb work start` during the session.
+      Used when KB_SESSION_ID is in the environment AND the file exists.
+      Once present it is authoritative for this session — no other session
+      can see or change it.
 
 2. Global file: ~/.mykb/workspaces/.active
-   └─ Fallback. Used when KB_SESSION_ID is not set.
-      Single-instance CLI use on the host, no alias involved.
+   └─ Used when KB_SESSION_ID is not set (plain CLI on the host), OR when
+      it is set but this session hasn't run `kb work start` yet — the
+      session inherits whatever workspace is currently active until it
+      sets its own. Returns null only when neither pointer exists.
+      (See "Update 2026-05-11" below — originally Tier 1 returned null on
+      a session-file miss.)
 ```
 
 ### `setActiveWorkspaceId(id)`
@@ -84,19 +89,48 @@ This file contains only the active workspace ID for that session. It is:
 
 ### `clearActiveWorkspaceId()`
 
-- `KB_SESSION_ID` set → removes session file (never touches `.active`)
+- `KB_SESSION_ID` set → removes session file (never touches `.active`); the
+  next `getActiveWorkspaceId()` then falls through to `.active`
 - `KB_SESSION_ID` not set → removes `.active` as today
 
 ## Agent Flow
 
 When a session launches with `KB_SESSION_ID`:
 
-1. Agent starts, runs `kb work show` → no session file yet → returns null
-2. Agent sees no active workspace, asks the user which workspace to use
-3. User says "plandent"
-4. Agent runs `kb work start plandent` → writes to session file
-5. All subsequent `kb work show`, `kb work journal`, etc. read from session file
-6. Fully isolated — no other session can see or modify this session's workspace
+1. Agent starts, runs `kb work show` → no session file yet → reads the
+   global `.active` (the workspace currently active on this brain), or null
+   if none is set
+2. To work in a *different* workspace than the global default — or to pin
+   itself so a concurrent change to `.active` can't move it — the agent
+   runs `kb work start <id>`, which writes the session file
+3. All subsequent `kb work show`, `kb work journal`, etc. read from the
+   session file
+4. Fully isolated from that point — no other session can see or modify this
+   session's workspace
+
+## Update 2026-05-11 — Tier 1 falls through to `.active` on a session-file miss
+
+Originally `getActiveWorkspaceId()` returned `null` whenever `KB_SESSION_ID`
+was set but the session file didn't exist ("a fresh session has no active
+workspace until it runs `kb work start`"). That meant a process with
+`KB_SESSION_ID` set could *never* see the global `.active` — which broke the
+kb-spike Pi container: its `prepare()` runs `kb work start` with
+`KB_SESSION_ID` *unset* (so it writes `.active`), but the container itself
+runs with `KB_SESSION_ID` set, so it looked at an empty `/tmp` session file
+and saw no workspace — no `<mykb-workspace>` injection, no `state.setBoostedAreas()`.
+(GH issue #5 / kb gotcha `gpn7eWFl`; `journal-auto-inject` + `handoff` L4
+matrices were RED because of it.)
+
+Now Tier 1 only short-circuits when the session file *exists*; otherwise it
+falls through to Tier 2. The clobbering this design prevents is still
+prevented: `setActiveWorkspaceId` with `KB_SESSION_ID` set writes the session
+file (never `.active`), so once a session has run `kb work start` it is
+pinned and a concurrent `.active` change can't move it. The only behaviour
+change is *before* a session runs `kb work start`: it now inherits the global
+default instead of seeing nothing (and `kb work journal` etc. issued without
+a prior `kb work start` append to that inherited workspace rather than
+erroring). `kb work stop` (with `KB_SESSION_ID` set) likewise drops you back
+to the global default rather than to "no workspace".
 
 ## Shell Functions
 
@@ -202,16 +236,14 @@ private sessionFile(): string | null {
 `getActiveWorkspaceId()`:
 ```typescript
 getActiveWorkspaceId(): string | null {
-  // Tier 1: per-session isolation
+  // Tier 1: per-session pointer (authoritative once it exists).
   const sf = this.sessionFile();
-  if (sf) {
-    if (fs.existsSync(sf)) {
-      return fs.readFileSync(sf, 'utf-8').trim() || null;
-    }
-    return null; // session active but no workspace set yet
+  if (sf && fs.existsSync(sf)) {
+    return fs.readFileSync(sf, 'utf-8').trim() || null;
   }
 
-  // Tier 2: global fallback
+  // Tier 2: global pointer — reached when KB_SESSION_ID is unset, or
+  // when it is set but the session hasn't run `kb work start` yet.
   const file = this.activeFile();
   if (!fs.existsSync(file)) return null;
   return fs.readFileSync(file, 'utf-8').trim() || null;
