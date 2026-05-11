@@ -22,16 +22,13 @@ These ship with full `EXPERIMENT.md` + at least one `scenarios/*.sh` and have be
 | `kb_work_*` tools (journal, state, note) | [`experiments/kb-work-tools/`](../experiments/kb-work-tools/) | journal-tool, state-tool, note-tool, no-active-workspace | ✅ implemented — the streaming workspace-mutation path (per-tool); `state-tool` is the cross-step `<mykb-workspace>` re-injection anchor |
 | `kb_add` tool | [`experiments/kb-add/`](../experiments/kb-add/) | add-fact, add-decision-with-why, add-then-search-roundtrip, add-to-unknown-area | ✅ implemented — the LLM-mutates-area path (per-entry-type); `add-then-search-roundtrip` is the write → FTS index → retrieve closed-loop anchor; `add-to-unknown-area` pins the auto-create policy |
 | `kb_verify` tool | [`experiments/kb-verify/`](../experiments/kb-verify/) | verify-by-id, add-then-verify-roundtrip, verify-unknown-id | ✅ implemented — the trust-decay promote-half; `add-then-verify-roundtrip` is the create-and-attest anchor; pins the NEGATIVE that `verifyEntry` records no `source` |
+| `/kb` slash command | [`experiments/kb-command/`](../experiments/kb-command/) | load-marks-area-loaded, usage-on-empty-args, unknown-area-no-load | 🟡 **partial** — these 3 single-step scenarios anchor dispatch + the `pi.sendMessage` content + `markAreaLoaded` persistence (and surfaced the never-worked-against-real-Pi `/kb` bug — gotcha `QbRwqLxJ`). The `load-and-cite` row (LLM cites a `/kb`-loaded marker) is **blocked on harness support** — [issue #7](https://github.com/vilosource/mykb/issues/7). |
 
-**Total: 12 matrices, 49 scenarios** (including 1 documented known-fail).
+**Total: 13 matrices, 52 scenarios** (including 1 documented known-fail). Every Layer-4 feature now has ≥1 scenario — the "Scaffolded matrices" backlog is empty.
 
 ## Scaffolded matrices (not-yet-implemented)
 
-Each has an `EXPERIMENT.md` with intent + behavior matrix but no `scenarios/*.sh` yet. The methodology requires every Layer-4 feature to have at least one scenario; these are **violations of that rule** that will be closed by future cycles.
-
-| Feature | Matrix | Why it needs L4 |
-|---|---|---|
-| `/kb` slash command | [`experiments/kb-command/`](../experiments/kb-command/) | On-demand area loading via Pi's slash-command surface. Currently L1-only. |
+_None._ Every `experiments/<feature>/` ships at least one `scenarios/*.sh`. (If a future feature lands without its matrix, add a row here AND scaffold its `EXPERIMENT.md` so this doc stays linkable.)
 
 ## Sub-behavior gaps in implemented matrices
 
@@ -41,6 +38,8 @@ These belong to existing matrices but the matrix's behavior table flags them as 
 |---|---|---|
 | `area-scoring` | Sticky-area persistence across turns | An area loaded in turn N gets a sticky-boost in turn N+1. Scenario attempted; **blocked** — [issue #6](https://github.com/vilosource/mykb/issues/6). |
 | `area-scoring` | Token-budget eviction order | When the 2000-token budget is exceeded, which areas keep their entries? Highest-scoring — `selectEntriesForInjection` now has a deterministic area-id tie-break, but the end-to-end scenario is **blocked** on the same investigation ([issue #6](https://github.com/vilosource/mykb/issues/6)). |
+| `kb-command` | `load-and-cite` — LLM cites a `/kb`-loaded marker | `/kb` triggers no LLM turn; `step` can't deliver `/kb <area>` + a follow-up prompt in one Pi process (`vfa run` = one `--prompt`, no Pi-level session continuity). **Blocked** — [issue #7](https://github.com/vilosource/mykb/issues/7). The LLM-reads-a-`role:'custom'`-message leg itself is already exercised by `area-scoring/scoring-isolated.sh`. |
+| `kb-command` | `multiple-areas` — `/kb a b` injects both | Single-step-testable (a 2-area variant of `load-marks-area-loaded`); not yet written. |
 
 ## Cross-cutting properties without an L4 home
 

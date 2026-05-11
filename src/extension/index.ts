@@ -62,8 +62,10 @@ export default function (pi: ExtensionAPI): void {
   pi.on('tool_result', createToolResultHandler(state));
   pi.on('input', createInputHandler(state));
 
-  // Tier 3 — /kb command for on-demand area loading
-  pi.registerCommand('kb', createKbCommandHandler(store, state));
+  // Tier 3 — /kb command for on-demand area loading. Passes `pi` so the
+  // handler can call `pi.sendMessage(...)` (the command `ctx` carries no
+  // message-injection method).
+  pi.registerCommand('kb', createKbCommandHandler(store, state, pi));
 
   // Register tools (with workspace storage for workspace tools).
   //
