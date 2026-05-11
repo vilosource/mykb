@@ -7,4 +7,18 @@ export default tseslint.config(
   },
   ...tseslint.configs.recommended,
   eslintConfigPrettier,
+  {
+    rules: {
+      // A leading underscore marks an intentionally-unused binding
+      // (callback params we don't read, reserved-for-future args, etc.).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
 );

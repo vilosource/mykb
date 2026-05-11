@@ -235,9 +235,7 @@ describe('Tier 2 — context handler', () => {
         const result = await handler(event);
 
         // Result must be a ContextEventResult-shaped object.
-        expect(result).toEqual(
-          expect.objectContaining({ messages: expect.any(Array) }),
-        );
+        expect(result).toEqual(expect.objectContaining({ messages: expect.any(Array) }));
         // Original messages must still be present (we prepend, not replace).
         expect(result!.messages![result!.messages!.length - 1]).toEqual({
           role: 'user',

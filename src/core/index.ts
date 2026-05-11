@@ -83,7 +83,13 @@ export { regenerateManifest, readManifest } from './manifest.js';
 
 export { MykbStore } from './knowledge-store.js';
 
-export { renderMarkdown, renderContextBlock, renderAreaIndex, renderJson, renderWorkspace } from './render.js';
+export {
+  renderMarkdown,
+  renderContextBlock,
+  renderAreaIndex,
+  renderJson,
+  renderWorkspace,
+} from './render.js';
 
 export { initBrain, isDirtyShutdown, recoverDirtyShutdown } from './init.js';
 

@@ -19,17 +19,14 @@ beforeAll(() => {
  * When sessionId is provided, it simulates a session-isolated launch.
  * When omitted, it simulates plain `kb` on the host (no isolation).
  */
-function runKb(
-  args: string,
-  sessionId?: string,
-): { stdout: string; exitCode: number } {
+function runKb(args: string, sessionId?: string): { stdout: string; exitCode: number } {
   // Pin the child's tmpdir to brainPath so session files (which the
   // production code writes to os.tmpdir() based on TMPDIR/TEMP/TMP)
   // land inside this test's per-test directory. Without this, parallel
   // test files that all use os.tmpdir() race on each other's afterEach
   // cleanup of .mykb-session-* files.
   const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...(process.env as Record<string, string>),
     MYKB_DIR: brainPath,
     TMPDIR: brainPath,
     TMP: brainPath,

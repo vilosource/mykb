@@ -6,7 +6,14 @@ import {
   renderJson,
   renderWorkspace,
 } from '../../src/core/render.js';
-import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext, HandoffData } from '../../src/core/types.js';
+import type {
+  KnowledgeEntry,
+  AreaMetadata,
+  Workspace,
+  JournalEntry,
+  AreaContext,
+  HandoffData,
+} from '../../src/core/types.js';
 import { Zone, ProvenanceStatus } from '../../src/core/types.js';
 
 function makeEntry(overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry {
@@ -180,7 +187,12 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     areas: ['stark', 'infra-vm'],
     links: { jira: 'STARK-653', wiki: 'https://wiki.example.com' },
     artifacts: [
-      { id: 'abc12345', filename: 'docs/server-inventory.md', type: 'design', description: 'VM specs and IPs' },
+      {
+        id: 'abc12345',
+        filename: 'docs/server-inventory.md',
+        type: 'design',
+        description: 'VM specs and IPs',
+      },
       { id: 'def67890', filename: 'backlog/items.md', type: 'other', description: '' },
     ],
     created: '2026-03-14T00:00:00.000Z',
@@ -251,9 +263,17 @@ describe('renderWorkspace', () => {
       ],
     });
     const output = renderWorkspace(ws, []);
-    const lines = output.split('\n').filter((l) => l.includes('aaa00001') || l.includes('bbb00002') || l.includes('ccc00003'));
+    const lines = output
+      .split('\n')
+      .filter((l) => l.includes('aaa00001') || l.includes('bbb00002') || l.includes('ccc00003'));
     // All type fields should be padded to same width
-    const typePositions = lines.map((l) => l.indexOf('plan') !== -1 ? l.indexOf('plan') : l.indexOf('design') !== -1 ? l.indexOf('design') : l.indexOf('analysis'));
+    const typePositions = lines.map((l) =>
+      l.indexOf('plan') !== -1
+        ? l.indexOf('plan')
+        : l.indexOf('design') !== -1
+          ? l.indexOf('design')
+          : l.indexOf('analysis'),
+    );
     expect(new Set(typePositions).size).toBe(1); // all start at same column
   });
 
@@ -434,9 +454,7 @@ describe('renderWorkspace', () => {
         stats: { facts: 1, decisions: 0, gotchas: 0, patterns: 0, links: 0 },
       },
     ];
-    const journal: JournalEntry[] = [
-      { date: '2026-03-15T00:00:00.000Z', text: 'Did something' },
-    ];
+    const journal: JournalEntry[] = [{ date: '2026-03-15T00:00:00.000Z', text: 'Did something' }];
     const output = renderWorkspace(ws, journal, areaContexts);
 
     const reposPos = output.indexOf('Repos:');
@@ -508,9 +526,7 @@ describe('renderWorkspace', () => {
         text: 'Fresh handoff.',
         updated: '2026-03-22T14:30:00.000Z',
       };
-      const journal: JournalEntry[] = [
-        { date: '2026-03-21T10:00:00.000Z', text: 'Older work' },
-      ];
+      const journal: JournalEntry[] = [{ date: '2026-03-21T10:00:00.000Z', text: 'Older work' }];
       const output = renderWorkspace(ws, journal, undefined, handoff);
       expect(output).toContain('## Resume (2026-03-22)');
       expect(output).not.toContain('may be outdated');
@@ -539,9 +555,7 @@ describe('renderWorkspace', () => {
           stats: { facts: 1, decisions: 0, gotchas: 0, patterns: 0, links: 0 },
         },
       ];
-      const journal: JournalEntry[] = [
-        { date: '2026-03-15T00:00:00.000Z', text: 'Did something' },
-      ];
+      const journal: JournalEntry[] = [{ date: '2026-03-15T00:00:00.000Z', text: 'Did something' }];
       const handoff: HandoffData = {
         text: 'Resume context.',
         updated: '2026-03-22T00:00:00.000Z',

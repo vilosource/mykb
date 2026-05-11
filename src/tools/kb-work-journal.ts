@@ -34,8 +34,7 @@ export function registerKbWorkJournal(pi: ExtensionAPI, wsStorage: WorkspaceStor
   pi.registerTool({
     name: 'kb_work_journal',
     label: 'Add Journal Entry',
-    description:
-      'Add a journal entry to the active workspace\'s progress log',
+    description: "Add a journal entry to the active workspace's progress log",
     parameters: {
       type: 'object',
       properties: {

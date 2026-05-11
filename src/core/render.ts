@@ -1,4 +1,11 @@
-import type { KnowledgeEntry, AreaMetadata, Workspace, JournalEntry, AreaContext, HandoffData } from './types.js';
+import type {
+  KnowledgeEntry,
+  AreaMetadata,
+  Workspace,
+  JournalEntry,
+  AreaContext,
+  HandoffData,
+} from './types.js';
 import { ProvenanceStatus } from './types.js';
 
 function capitalizeZone(zone: string): string {
@@ -94,9 +101,8 @@ export function renderWorkspace(
   if (handoff) {
     const dateStr = handoff.updated ? handoff.updated.split('T')[0] : 'unknown';
     // Stale detection: if newest journal entry is newer than handoff, mark as possibly outdated
-    const newestJournal = journalEntries.length > 0
-      ? journalEntries[journalEntries.length - 1].date
-      : null;
+    const newestJournal =
+      journalEntries.length > 0 ? journalEntries[journalEntries.length - 1].date : null;
     const isStale = newestJournal && handoff.updated && newestJournal > handoff.updated;
     const staleSuffix = isStale ? ', may be outdated' : '';
     lines.push('');
@@ -113,7 +119,8 @@ export function renderWorkspace(
   const stateFields: string[] = [];
   if (workspace.state.phase !== undefined) stateFields.push(`Phase: ${workspace.state.phase}`);
   if (workspace.state.active !== undefined) stateFields.push(`Active: ${workspace.state.active}`);
-  if (workspace.state.blocked !== undefined) stateFields.push(`Blocked: ${workspace.state.blocked}`);
+  if (workspace.state.blocked !== undefined)
+    stateFields.push(`Blocked: ${workspace.state.blocked}`);
   if (workspace.state.next !== undefined) stateFields.push(`Next: ${workspace.state.next}`);
   if (stateFields.length > 0) {
     lines.push(stateFields.join(' | '));
@@ -171,7 +178,8 @@ export function renderWorkspace(
 function formatStatsCounts(stats: AreaContext['stats']): string {
   const parts: string[] = [];
   if (stats.facts > 0) parts.push(`${stats.facts} fact${stats.facts !== 1 ? 's' : ''}`);
-  if (stats.decisions > 0) parts.push(`${stats.decisions} decision${stats.decisions !== 1 ? 's' : ''}`);
+  if (stats.decisions > 0)
+    parts.push(`${stats.decisions} decision${stats.decisions !== 1 ? 's' : ''}`);
   if (stats.gotchas > 0) parts.push(`${stats.gotchas} gotcha${stats.gotchas !== 1 ? 's' : ''}`);
   if (stats.patterns > 0) parts.push(`${stats.patterns} pattern${stats.patterns !== 1 ? 's' : ''}`);
   if (stats.links > 0) parts.push(`${stats.links} link${stats.links !== 1 ? 's' : ''}`);

@@ -13,7 +13,10 @@ beforeAll(() => {
   execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'pipe' });
 });
 
-function runKb(args: string, opts?: { stdin?: string }): { stdout: string; stderr: string; exitCode: number } {
+function runKb(
+  args: string,
+  opts?: { stdin?: string },
+): { stdout: string; stderr: string; exitCode: number } {
   // Strip an ambient KB_SESSION_ID so the CLI uses the temp brain's .active
   // pointer rather than a process-wide /tmp session file.
   const env: NodeJS.ProcessEnv = { ...process.env, MYKB_DIR: brainPath };
@@ -62,7 +65,7 @@ describe('kb work CLI', () => {
     });
 
     it('creates a workspace with jira and wiki links', () => {
-      const { stdout, exitCode } = runKb(
+      const { exitCode } = runKb(
         'work create test-ws "Test" --jira PROJ-123 --wiki https://wiki.example.com',
       );
       expect(exitCode).toBe(0);
@@ -159,7 +162,7 @@ describe('kb work CLI', () => {
     it('updates multiple state fields', () => {
       runKb('work create test-ws "Test"');
       runKb('work start test-ws');
-      const { stdout, exitCode } = runKb(
+      const { exitCode } = runKb(
         'work state --phase "building" --active "implementing CLI" --next "write tests"',
       );
       expect(exitCode).toBe(0);
@@ -514,7 +517,12 @@ describe('kb work CLI', () => {
         stdin: JSON.stringify({
           knowledge: [
             { type: 'fact', area: 'test-area', text: 'Checkpoint works' },
-            { type: 'decision', area: 'test-area', text: 'Use JSON stdin', why: 'Harness agnostic' },
+            {
+              type: 'decision',
+              area: 'test-area',
+              text: 'Use JSON stdin',
+              why: 'Harness agnostic',
+            },
           ],
         }),
       });
@@ -532,9 +540,7 @@ describe('kb work CLI', () => {
           journal: 'Full checkpoint test',
           handoff: 'Session continuity text',
           state: { phase: 'done', next: 'ship it' },
-          knowledge: [
-            { type: 'fact', area: 'test-area', text: 'All fields work' },
-          ],
+          knowledge: [{ type: 'fact', area: 'test-area', text: 'All fields work' }],
         }),
       });
       expect(exitCode).toBe(0);
@@ -583,9 +589,7 @@ describe('kb work CLI', () => {
       const { stdout, exitCode } = runKb('work checkpoint', {
         stdin: JSON.stringify({
           journal: 'Still works',
-          knowledge: [
-            { type: 'fact', area: 'nonexistent-area', text: 'Should fail' },
-          ],
+          knowledge: [{ type: 'fact', area: 'nonexistent-area', text: 'Should fail' }],
         }),
       });
       // Command should still succeed (journal written) but report knowledge errors

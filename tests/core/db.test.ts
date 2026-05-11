@@ -304,10 +304,7 @@ describe('searchEntries', () => {
   it('should exclude archived entries when excludeZone is set', () => {
     const db = createDatabase(':memory:');
 
-    upsertEntry(
-      db,
-      makeEntry({ id: 'dns-active', text: 'DNS uses CoreDNS', zone: Zone.Active }),
-    );
+    upsertEntry(db, makeEntry({ id: 'dns-active', text: 'DNS uses CoreDNS', zone: Zone.Active }));
     upsertEntry(
       db,
       makeEntry({ id: 'dns-archived', text: 'DNS used BIND9 (deprecated)', zone: Zone.Archive }),
@@ -323,10 +320,7 @@ describe('searchEntries', () => {
   it('should return all entries including archived when no excludeZone', () => {
     const db = createDatabase(':memory:');
 
-    upsertEntry(
-      db,
-      makeEntry({ id: 'dns-active', text: 'DNS uses CoreDNS', zone: Zone.Active }),
-    );
+    upsertEntry(db, makeEntry({ id: 'dns-active', text: 'DNS uses CoreDNS', zone: Zone.Active }));
     upsertEntry(
       db,
       makeEntry({ id: 'dns-archived', text: 'DNS used BIND9 (deprecated)', zone: Zone.Archive }),

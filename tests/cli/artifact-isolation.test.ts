@@ -56,17 +56,21 @@ function runKbAsync(
 ): Promise<{ stdout: string; exitCode: number }> {
   return new Promise((resolve) => {
     const env = envForChild(opts?.sessionId ? { KB_SESSION_ID: opts.sessionId } : {});
-    const child = exec(`node ${CLI_PATH} ${args}`, {
-      cwd: PROJECT_ROOT,
-      env,
-      encoding: 'utf-8',
-      timeout: 10000,
-    }, (error, stdout, stderr) => {
-      resolve({
-        stdout: (stdout || stderr || '').toString(),
-        exitCode: error ? (error as { code?: number }).code ?? 1 : 0,
-      });
-    });
+    const child = exec(
+      `node ${CLI_PATH} ${args}`,
+      {
+        cwd: PROJECT_ROOT,
+        env,
+        encoding: 'utf-8',
+        timeout: 10000,
+      },
+      (error, stdout, stderr) => {
+        resolve({
+          stdout: (stdout || stderr || '').toString(),
+          exitCode: error ? ((error as { code?: number }).code ?? 1) : 0,
+        });
+      },
+    );
     if (opts?.stdin) {
       child.stdin?.write(opts.stdin);
       child.stdin?.end();
@@ -151,9 +155,8 @@ describe('Artifact Isolation E2E', () => {
       runKbAsync('wsa add conflict.md', { stdin: '# Version B', sessionId: sessionB }),
     ]);
 
-    // At least one should succeed, at least one may fail
+    // At least one should succeed (the other may fail on the claim file)
     const successes = [resultA, resultB].filter((r) => r.exitCode === 0);
-    const failures = [resultA, resultB].filter((r) => r.exitCode !== 0);
     expect(successes.length).toBeGreaterThanOrEqual(1);
 
     // Final state should be consistent — exactly one artifact with that filename
@@ -215,7 +218,8 @@ describe('Artifact Isolation E2E', () => {
 
     // Final list should have no duplicate filenames
     const { stdout } = runKb('wsa list');
-    const filenames = stdout.split('\n')
+    const filenames = stdout
+      .split('\n')
       .filter((l) => l.includes('.md'))
       .map((l) => l.match(/\S+\.md/)?.[0])
       .filter(Boolean);

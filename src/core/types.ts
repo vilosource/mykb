@@ -315,7 +315,12 @@ export interface WorkspaceStorage {
   readHandoff(id: string): HandoffData | null;
   clearHandoff(id: string): void;
   // Artifact CRUD
-  addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string;
+  addArtifact(
+    workspaceId: string,
+    filename: string,
+    content: string,
+    options?: AddArtifactOptions,
+  ): string;
   readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null;
   readArtifactContent(workspaceId: string, idOrFilename: string): string | null;
   updateArtifact(workspaceId: string, id: string, updates: Partial<ArtifactEntry>): void;

@@ -72,10 +72,7 @@ describe('readManifest', () => {
 describe('manifest tags', () => {
   it('regenerateManifest populates tags from area metadata', async () => {
     await withTempBrain(async (brainPath) => {
-      createArea(brainPath, 'networking', 'Networking', 'Network knowledge', [
-        'dns',
-        'routing',
-      ]);
+      createArea(brainPath, 'networking', 'Networking', 'Network knowledge', ['dns', 'routing']);
       regenerateManifest(brainPath);
 
       const manifest = readManifest(brainPath);

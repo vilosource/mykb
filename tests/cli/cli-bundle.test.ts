@@ -12,7 +12,10 @@ beforeAll(() => {
   execSync('npm run bundle:cli', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 60000 });
 }, 60000);
 
-function runBundledKb(args: string, env?: Record<string, string>): { stdout: string; exitCode: number } {
+function runBundledKb(
+  args: string,
+  env?: Record<string, string>,
+): { stdout: string; exitCode: number } {
   try {
     const stdout = execSync(`node ${BUNDLE_CLI} ${args}`, {
       cwd: PROJECT_ROOT,
@@ -46,7 +49,9 @@ describe('cli-bundle', () => {
         check: () => {
           const pkgPath = path.join(BUNDLE_DIR, 'package.json');
           expect(fs.existsSync(pkgPath)).toBe(true);
-          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as { dependencies: Record<string, string> };
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as {
+            dependencies: Record<string, string>;
+          };
           expect(pkg.dependencies['better-sqlite3']).toBeDefined();
         },
       },
@@ -112,7 +117,9 @@ describe('cli-bundle', () => {
       expect(initResult.exitCode).toBe(0);
       expect(initResult.stdout).toContain('Brain initialized');
 
-      const addResult = runBundledKb('add fact test-area "bundled test fact"', { MYKB_DIR: brainPath });
+      const addResult = runBundledKb('add fact test-area "bundled test fact"', {
+        MYKB_DIR: brainPath,
+      });
       expect(addResult.exitCode).toBe(0);
       expect(addResult.stdout).toContain('added fact');
     });

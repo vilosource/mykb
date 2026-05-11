@@ -109,7 +109,11 @@ function normalizeTags(raw: string | null): string[] {
   const parsed = JSON.parse(raw);
   if (Array.isArray(parsed)) return parsed as string[];
   // Legacy format: comma-separated string (e.g. "dns,dnsmasq,ansible")
-  if (typeof parsed === 'string') return parsed.split(',').map((t) => t.trim()).filter(Boolean);
+  if (typeof parsed === 'string')
+    return parsed
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
   return [];
 }
 
@@ -293,7 +297,11 @@ export function sanitizeFtsQuery(query: string): string {
   return tokens.map((t) => `"${t}"`).join(' ');
 }
 
-export function searchEntries(db: Database.Database, query: string, excludeZone?: Zone): KnowledgeEntry[] {
+export function searchEntries(
+  db: Database.Database,
+  query: string,
+  excludeZone?: Zone,
+): KnowledgeEntry[] {
   const sanitized = sanitizeFtsQuery(query);
   if (!sanitized) return [];
 
@@ -307,9 +315,7 @@ export function searchEntries(db: Database.Database, query: string, excludeZone?
   // ranked entry hits; we don't have a meaningful cross-index BM25
   // score, so the policy is "direct matches first, then siblings."
   const areaFtsRows = db
-    .prepare(
-      `SELECT area_id FROM areas_fts WHERE areas_fts MATCH @query ORDER BY rank`,
-    )
+    .prepare(`SELECT area_id FROM areas_fts WHERE areas_fts MATCH @query ORDER BY rank`)
     .all({ query: sanitized }) as { area_id: string }[];
 
   if (entryFtsRows.length === 0 && areaFtsRows.length === 0) return [];
@@ -330,9 +336,7 @@ export function searchEntries(db: Database.Database, query: string, excludeZone?
     const areaPlaceholders = areaFtsRows.map(() => '?').join(',');
     const areaIds = areaFtsRows.map((r) => r.area_id);
     const siblingRows = db
-      .prepare(
-        `SELECT id, area FROM entries WHERE area IN (${areaPlaceholders}) ORDER BY area, id`,
-      )
+      .prepare(`SELECT id, area FROM entries WHERE area IN (${areaPlaceholders}) ORDER BY area, id`)
       .all(...areaIds) as { id: string; area: string }[];
     // Group entry ids by area-id, then emit in area-rank order.
     const byArea = new Map<string, string[]>();
@@ -360,9 +364,7 @@ export function searchEntries(db: Database.Database, query: string, excludeZone?
     entrySql += ' AND zone != ?';
     entryParams.push(excludeZone);
   }
-  const entryRows = db
-    .prepare(entrySql)
-    .all(...entryParams) as EntryRow[];
+  const entryRows = db.prepare(entrySql).all(...entryParams) as EntryRow[];
 
   const entryMap = new Map<string, EntryRow>();
   for (const row of entryRows) {

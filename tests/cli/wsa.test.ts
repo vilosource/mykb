@@ -60,7 +60,7 @@ describe('kb wsa CLI', () => {
       const srcFile = path.join(brainPath, 'external.md');
       fs.writeFileSync(srcFile, '# External Doc');
 
-      const { stdout, exitCode } = runKb(`wsa add external-DESIGN.md --from ${srcFile}`);
+      const { exitCode } = runKb(`wsa add external-DESIGN.md --from ${srcFile}`);
       expect(exitCode).toBe(0);
 
       const docsDir = path.join(brainPath, 'workspaces', 'test-ws', 'docs');
@@ -74,7 +74,7 @@ describe('kb wsa CLI', () => {
     });
 
     it('reads content from stdin and registers', () => {
-      const { stdout, exitCode } = runKb('wsa add stdin-doc.md', { stdin: '# From Stdin' });
+      const { exitCode } = runKb('wsa add stdin-doc.md', { stdin: '# From Stdin' });
       expect(exitCode).toBe(0);
 
       const docsDir = path.join(brainPath, 'workspaces', 'test-ws', 'docs');
@@ -241,7 +241,10 @@ describe('kb wsa CLI', () => {
     it('--fix registers untracked files', () => {
       const docsDir = path.join(brainPath, 'workspaces', 'test-ws', 'docs');
       fs.mkdirSync(docsDir, { recursive: true });
-      fs.writeFileSync(path.join(docsDir, 'auto-PLAN.md'), '---\ndescription: Auto registered\n---\n# Auto');
+      fs.writeFileSync(
+        path.join(docsDir, 'auto-PLAN.md'),
+        '---\ndescription: Auto registered\n---\n# Auto',
+      );
 
       runKb('wsa sync --fix');
 
@@ -280,6 +283,7 @@ describe('kb wsa CLI', () => {
       runKb('wsa add doc.md', { stdin: '# Content' });
       const { stdout, exitCode } = runKb('wsa search nonexistentterm');
       expect(exitCode).toBe(0);
+      expect(stdout).not.toContain('doc.md');
     });
   });
 });

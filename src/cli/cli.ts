@@ -9,7 +9,13 @@ import { readVersion } from './version.js';
 import { initBrain } from '../core/init.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
 import { MykbStore } from '../core/knowledge-store.js';
-import { createArea, listAreas, readAreaMetadata, updateAreaMetadata, deleteArea } from '../core/area.js';
+import {
+  createArea,
+  listAreas,
+  readAreaMetadata,
+  updateAreaMetadata,
+  deleteArea,
+} from '../core/area.js';
 import { regenerateManifest } from '../core/manifest.js';
 import { renderMarkdown, renderJson, renderAreaIndex, renderWorkspace } from '../core/render.js';
 import { FileSystemWorkspaceStorage } from '../core/workspace.js';
@@ -595,7 +601,10 @@ workCmd
       if (opts.repos) links.repos = opts.repos.split(',').map((r) => r.trim());
       storage.createWorkspace(id, name, {
         areas,
-        links: Object.keys(links).length > 0 ? (links as { jira?: string; wiki?: string; repos?: string[] }) : undefined,
+        links:
+          Object.keys(links).length > 0
+            ? (links as { jira?: string; wiki?: string; repos?: string[] })
+            : undefined,
       });
       console.log(`Workspace '${id}' created`);
     },
@@ -642,13 +651,17 @@ workCmd
     if (activeId) {
       const handoff = storage.readHandoff(activeId);
       if (!handoff) {
-        process.stderr.write('Warning: no handoff written. Use `kb work handoff` to capture session context.\n');
+        process.stderr.write(
+          'Warning: no handoff written. Use `kb work handoff` to capture session context.\n',
+        );
       } else {
         // Check if handoff is stale (journal entries newer than handoff)
         const journal = storage.readJournal(activeId);
         const newestJournal = journal.length > 0 ? journal[journal.length - 1].date : null;
         if (newestJournal && handoff.updated && newestJournal > handoff.updated) {
-          process.stderr.write('Warning: handoff may be outdated. Use `kb work handoff` to update.\n');
+          process.stderr.write(
+            'Warning: handoff may be outdated. Use `kb work handoff` to update.\n',
+          );
         }
       }
     }
@@ -658,7 +671,9 @@ workCmd
 
 workCmd
   .command('handoff [text]')
-  .description('Capture what you are working on and what is next, so the next session can resume without ramp-up')
+  .description(
+    'Capture what you are working on and what is next, so the next session can resume without ramp-up',
+  )
   .option('--clear', 'Remove the handoff')
   .action((text: string | undefined, opts: { clear?: boolean }) => {
     const storage = createWorkspaceStorage();
@@ -686,7 +701,9 @@ workCmd
 
 workCmd
   .command('checkpoint')
-  .description('Batch update workspace: journal, handoff, state, and knowledge entries from structured JSON via stdin')
+  .description(
+    'Batch update workspace: journal, handoff, state, and knowledge entries from structured JSON via stdin',
+  )
   .action(() => {
     const storage = createWorkspaceStorage();
     const activeId = requireActiveWorkspace(storage);
@@ -709,7 +726,9 @@ workCmd
     const validKeys = new Set(['journal', 'handoff', 'state', 'knowledge']);
     for (const key of Object.keys(input)) {
       if (!validKeys.has(key)) {
-        process.stderr.write(`Error: unknown field '${key}'. Valid fields: journal, handoff, state, knowledge.\n`);
+        process.stderr.write(
+          `Error: unknown field '${key}'. Valid fields: journal, handoff, state, knowledge.\n`,
+        );
         process.exit(1);
       }
     }
@@ -722,7 +741,10 @@ workCmd
       process.stderr.write('Error: handoff must be a string.\n');
       process.exit(1);
     }
-    if (input.state !== undefined && (typeof input.state !== 'object' || Array.isArray(input.state))) {
+    if (
+      input.state !== undefined &&
+      (typeof input.state !== 'object' || Array.isArray(input.state))
+    ) {
       process.stderr.write('Error: state must be an object.\n');
       process.exit(1);
     }
@@ -734,13 +756,23 @@ workCmd
     // Build addKnowledge callback using the store
     const bp = requireBrain();
     const store = MykbStore.open(bp);
-    const addKnowledge = (type: string, area: string, text: string, opts: Record<string, unknown>): string => {
+    const addKnowledge = (
+      type: string,
+      area: string,
+      text: string,
+      opts: Record<string, unknown>,
+    ): string => {
       switch (type) {
-        case 'fact': return store.addFact(area, text, opts);
-        case 'decision': return store.addDecision(area, text, opts);
-        case 'gotcha': return store.addGotcha(area, text, opts);
-        case 'pattern': return store.addPattern(area, text, opts);
-        default: throw new Error(`Unknown knowledge type: ${type}`);
+        case 'fact':
+          return store.addFact(area, text, opts);
+        case 'decision':
+          return store.addDecision(area, text, opts);
+        case 'gotcha':
+          return store.addGotcha(area, text, opts);
+        case 'pattern':
+          return store.addPattern(area, text, opts);
+        default:
+          throw new Error(`Unknown knowledge type: ${type}`);
       }
     };
 
@@ -848,7 +880,12 @@ workCmd
       return;
     }
 
-    const tags = opts.tags ? opts.tags.split(',').map((t) => t.trim()).filter(Boolean) : [];
+    const tags = opts.tags
+      ? opts.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
     const noteId = storage.appendNote(activeId, text, tags);
     const tagStr = tags.length > 0 ? ` [${tags.join(', ')}]` : '';
     console.log(`Note added to '${activeId}'${tagStr} (${noteId})`);
@@ -927,7 +964,9 @@ workCmd
     } else {
       const activeId = storage.getActiveWorkspaceId();
       if (!activeId) {
-        process.stderr.write('Error: no active workspace. Provide an id or run "kb work start <id>".\n');
+        process.stderr.write(
+          'Error: no active workspace. Provide an id or run "kb work start <id>".\n',
+        );
         process.exit(1);
       }
       wsId = activeId;
@@ -1042,7 +1081,9 @@ wsaCmd
     const content = storage.readArtifactContent(activeId, artifact);
 
     if (content === null) {
-      process.stderr.write(`Error: Artifact '${artifact}' not found. Run kb wsa list to see available artifacts.\n`);
+      process.stderr.write(
+        `Error: Artifact '${artifact}' not found. Run kb wsa list to see available artifacts.\n`,
+      );
       process.exit(1);
     }
 
@@ -1058,7 +1099,9 @@ wsaCmd
     const entry = storage.readArtifact(activeId, artifact);
 
     if (!entry) {
-      process.stderr.write(`Error: Artifact '${artifact}' not found. Run kb wsa list to see available artifacts.\n`);
+      process.stderr.write(
+        `Error: Artifact '${artifact}' not found. Run kb wsa list to see available artifacts.\n`,
+      );
       process.exit(1);
     }
 
@@ -1091,7 +1134,11 @@ wsaCmd
       if (opts.areas !== undefined) updates.areas = opts.areas.split(',').map((a) => a.trim());
 
       try {
-        storage.updateArtifact(activeId, artifact, updates as Partial<import('../core/types.js').ArtifactEntry>);
+        storage.updateArtifact(
+          activeId,
+          artifact,
+          updates as Partial<import('../core/types.js').ArtifactEntry>,
+        );
         console.log('Artifact updated.');
       } catch (e: unknown) {
         process.stderr.write(`Error: ${(e as Error).message}\n`);
@@ -1152,7 +1199,11 @@ wsaCmd
       }
     }
 
-    if (result.tracked.length === 0 && result.untracked.length === 0 && result.missing.length === 0) {
+    if (
+      result.tracked.length === 0 &&
+      result.untracked.length === 0 &&
+      result.missing.length === 0
+    ) {
       console.log('No artifacts to sync.');
     }
   });

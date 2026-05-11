@@ -57,8 +57,7 @@ export function registerKbWorkState(pi: ExtensionAPI, wsStorage: WorkspaceStorag
   pi.registerTool({
     name: 'kb_work_state',
     label: 'Update Workspace State',
-    description:
-      'Update the active workspace\'s state (phase, active task, blocked, next step)',
+    description: "Update the active workspace's state (phase, active task, blocked, next step)",
     parameters: {
       type: 'object',
       properties: {

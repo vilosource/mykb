@@ -5,8 +5,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withTempBrain } from '../helpers.js';
 import { FileSystemWorkspaceStorage } from '../../src/core/workspace.js';
-import type { Workspace, WorkspaceState, ArtifactEntry, HandoffData } from '../../src/core/types.js';
-import { EntryValidationError, ArtifactNotFoundError, WorkspaceNotFoundError } from '../../src/core/errors.js';
+import type { Workspace, WorkspaceState, ArtifactEntry } from '../../src/core/types.js';
+import {
+  EntryValidationError,
+  ArtifactNotFoundError,
+  WorkspaceNotFoundError,
+} from '../../src/core/errors.js';
 
 describe('FileSystemWorkspaceStorage CRUD', () => {
   it('createWorkspace creates workspace.json with correct structure', async () => {
@@ -72,7 +76,11 @@ describe('FileSystemWorkspaceStorage CRUD', () => {
   });
 
   describe('updateWorkspaceState — table-driven', () => {
-    const cases: { name: string; update: Partial<WorkspaceState>; expected: Partial<WorkspaceState> }[] = [
+    const cases: {
+      name: string;
+      update: Partial<WorkspaceState>;
+      expected: Partial<WorkspaceState>;
+    }[] = [
       {
         name: 'phase only',
         update: { phase: 'setup' },
@@ -168,7 +176,13 @@ describe('FileSystemWorkspaceStorage CRUD', () => {
       storage.createWorkspace('my-proj', 'My Project');
       storage.archiveWorkspace('my-proj');
 
-      const archiveFile = path.join(brainPath, 'workspaces', 'archive', 'my-proj', 'workspace.json');
+      const archiveFile = path.join(
+        brainPath,
+        'workspaces',
+        'archive',
+        'my-proj',
+        'workspace.json',
+      );
       expect(fs.existsSync(archiveFile)).toBe(true);
 
       const originalFile = path.join(brainPath, 'workspaces', 'my-proj', 'workspace.json');
@@ -316,7 +330,12 @@ describe('FileSystemWorkspaceStorage Notes', () => {
       const lines = fs.readFileSync(notesFile, 'utf-8').trim().split('\n');
       expect(lines).toHaveLength(1);
 
-      const entry = JSON.parse(lines[0]) as { id: string; date: string; text: string; tags: string[] };
+      const entry = JSON.parse(lines[0]) as {
+        id: string;
+        date: string;
+        text: string;
+        tags: string[];
+      };
       expect(entry.id).toBe(id);
       expect(entry.text).toBe('Login throws 500 on expired session');
       expect(entry.tags).toEqual(['bug']);
@@ -407,6 +426,7 @@ describe('FileSystemWorkspaceStorage Notes', () => {
 
       const notes = storage.readNotes('my-proj');
       expect(notes).toHaveLength(1);
+      expect(notes[0].id).toBe(id1);
       expect(notes[0].text).toBe('Keep this');
     });
   });
@@ -444,9 +464,13 @@ describe('FileSystemWorkspaceStorage Backward Compat (documents → artifacts)',
     {
       name: 'workspace.json with artifacts field returns artifacts as-is',
       setup: (raw: Record<string, unknown>) => {
-        raw.artifacts = [{ id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' }];
+        raw.artifacts = [
+          { id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' },
+        ];
       },
-      expectArtifacts: [{ id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' }],
+      expectArtifacts: [
+        { id: 'abc12345', filename: 'test-PLAN.md', type: 'plan', description: 'A test plan' },
+      ],
       expectNoDocuments: false,
     },
   ];
@@ -474,11 +498,31 @@ describe('FileSystemWorkspaceStorage Backward Compat (documents → artifacts)',
 describe('FileSystemWorkspaceStorage Artifacts', () => {
   describe('addArtifact', () => {
     const typeInferenceCases = [
-      { name: 'infers plan from -PLAN suffix', filename: 'migration-PLAN.md', expectedType: 'plan' },
-      { name: 'infers design from -DESIGN suffix', filename: 'arch-DESIGN.md', expectedType: 'design' },
-      { name: 'infers analysis from -ANALYSIS suffix', filename: 'risk-ANALYSIS.md', expectedType: 'analysis' },
-      { name: 'infers design from -ARCHITECTURE suffix', filename: 'sys-ARCHITECTURE.md', expectedType: 'design' },
-      { name: 'infers report from -GUIDE suffix', filename: 'ops-GUIDE.md', expectedType: 'report' },
+      {
+        name: 'infers plan from -PLAN suffix',
+        filename: 'migration-PLAN.md',
+        expectedType: 'plan',
+      },
+      {
+        name: 'infers design from -DESIGN suffix',
+        filename: 'arch-DESIGN.md',
+        expectedType: 'design',
+      },
+      {
+        name: 'infers analysis from -ANALYSIS suffix',
+        filename: 'risk-ANALYSIS.md',
+        expectedType: 'analysis',
+      },
+      {
+        name: 'infers design from -ARCHITECTURE suffix',
+        filename: 'sys-ARCHITECTURE.md',
+        expectedType: 'design',
+      },
+      {
+        name: 'infers report from -GUIDE suffix',
+        filename: 'ops-GUIDE.md',
+        expectedType: 'report',
+      },
       { name: 'infers other when no matching suffix', filename: 'notes.md', expectedType: 'other' },
       { name: 'infers type case-insensitively', filename: 'foo-plan.md', expectedType: 'plan' },
     ];
@@ -570,7 +614,10 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
       await withTempBrain(async (brainPath) => {
         const storage = new FileSystemWorkspaceStorage(brainPath);
         storage.createWorkspace('ws', 'Test');
-        const id = storage.addArtifact('ws', 'doc.md', '# Doc', { tags: ['t1', 't2'], areas: ['infra'] });
+        const id = storage.addArtifact('ws', 'doc.md', '# Doc', {
+          tags: ['t1', 't2'],
+          areas: ['infra'],
+        });
         const entry = storage.readArtifact('ws', id);
         expect(entry!.tags).toEqual(['t1', 't2']);
         expect(entry!.areas).toEqual(['infra']);
@@ -592,7 +639,9 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
       await withTempBrain(async (brainPath) => {
         const storage = new FileSystemWorkspaceStorage(brainPath);
         storage.createWorkspace('ws', 'Test');
-        expect(() => storage.addArtifact('ws', 'script.sh', '#!/bin/bash')).toThrow(EntryValidationError);
+        expect(() => storage.addArtifact('ws', 'script.sh', '#!/bin/bash')).toThrow(
+          EntryValidationError,
+        );
       });
     });
 
@@ -625,9 +674,16 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
         storage.createWorkspace('ws', 'Test');
         const docsDir = path.join(brainPath, 'workspaces', 'ws', 'docs');
         fs.mkdirSync(docsDir, { recursive: true });
-        fs.writeFileSync(path.join(docsDir, 'existing-PLAN.md'), '---\ndescription: Pre-existing\n---\n# Plan');
+        fs.writeFileSync(
+          path.join(docsDir, 'existing-PLAN.md'),
+          '---\ndescription: Pre-existing\n---\n# Plan',
+        );
 
-        const id = storage.addArtifact('ws', 'existing-PLAN.md', '---\ndescription: Pre-existing\n---\n# Plan');
+        const id = storage.addArtifact(
+          'ws',
+          'existing-PLAN.md',
+          '---\ndescription: Pre-existing\n---\n# Plan',
+        );
         const entry = storage.readArtifact('ws', id);
         expect(entry!.filename).toBe('existing-PLAN.md');
         expect(entry!.type).toBe('plan');
@@ -641,7 +697,9 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
         storage.createWorkspace('ws', 'Test');
         storage.addArtifact('ws', 'doc.md', '# Doc');
         // File exists on disk AND in metadata — should reject
-        expect(() => storage.addArtifact('ws', 'doc.md', '# Doc again')).toThrow(EntryValidationError);
+        expect(() => storage.addArtifact('ws', 'doc.md', '# Doc again')).toThrow(
+          EntryValidationError,
+        );
       });
     });
   });
@@ -776,7 +834,9 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
         expect(entry!.description).toBe('Updated desc');
 
         // Verify JSONL has new entry appended
-        const jsonl = fs.readFileSync(path.join(brainPath, 'workspaces', 'ws', 'artifacts.jsonl'), 'utf-8').trim();
+        const jsonl = fs
+          .readFileSync(path.join(brainPath, 'workspaces', 'ws', 'artifacts.jsonl'), 'utf-8')
+          .trim();
         const lines = jsonl.split('\n');
         expect(lines.length).toBe(2); // original + update
 
@@ -816,8 +876,9 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
       await withTempBrain(async (brainPath) => {
         const storage = new FileSystemWorkspaceStorage(brainPath);
         storage.createWorkspace('ws', 'Test');
-        expect(() => storage.updateArtifact('ws', 'nonexistent', { description: 'x' }))
-          .toThrow(ArtifactNotFoundError);
+        expect(() => storage.updateArtifact('ws', 'nonexistent', { description: 'x' })).toThrow(
+          ArtifactNotFoundError,
+        );
       });
     });
 
@@ -826,11 +887,15 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
         const storage = new FileSystemWorkspaceStorage(brainPath);
         storage.createWorkspace('ws', 'Test');
         const id = storage.addArtifact('ws', 'original.md', '# Original');
-        storage.updateArtifact('ws', id, { filename: 'renamed.md' } as Partial<import('../../src/core/types.js').ArtifactEntry>);
+        storage.updateArtifact('ws', id, { filename: 'renamed.md' } as Partial<
+          import('../../src/core/types.js').ArtifactEntry
+        >);
         const entry = storage.readArtifact('ws', id);
         expect(entry!.filename).toBe('original.md');
         // File on disk should still be original.md
-        expect(fs.existsSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'original.md'))).toBe(true);
+        expect(fs.existsSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'original.md'))).toBe(
+          true,
+        );
       });
     });
   });
@@ -908,7 +973,10 @@ describe('FileSystemWorkspaceStorage Artifacts', () => {
         storage.addArtifact('ws', 'missing.md', '# Missing');
         fs.unlinkSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'missing.md'));
         // untracked (file but no metadata)
-        fs.writeFileSync(path.join(brainPath, 'workspaces', 'ws', 'docs', 'untracked.md'), '# Untracked');
+        fs.writeFileSync(
+          path.join(brainPath, 'workspaces', 'ws', 'docs', 'untracked.md'),
+          '# Untracked',
+        );
 
         const result = storage.syncArtifacts('ws');
         expect(result.tracked).toHaveLength(1);

@@ -182,7 +182,7 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   }
 
   archiveWorkspace(id: string): void {
-    const ws = this.requireWorkspace(id);
+    this.requireWorkspace(id); // throws WorkspaceNotFoundError if missing
     const archiveDir = this.archiveDir(id);
     this.ensureDir(archiveDir);
 
@@ -428,7 +428,12 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     this.writeWorkspaceFile(id, ws);
   }
 
-  addArtifact(workspaceId: string, filename: string, content: string, options?: AddArtifactOptions): string {
+  addArtifact(
+    workspaceId: string,
+    filename: string,
+    content: string,
+    options?: AddArtifactOptions,
+  ): string {
     this.requireWorkspace(workspaceId);
 
     if (!filename.endsWith('.md')) {
@@ -507,8 +512,16 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
       this.refreshArtifactSummaries(workspaceId);
       return id;
     } finally {
-      try { fs.closeSync(claimFd); } catch { /* already closed */ }
-      try { fs.unlinkSync(claimPath); } catch { /* already removed */ }
+      try {
+        fs.closeSync(claimFd);
+      } catch {
+        /* already closed */
+      }
+      try {
+        fs.unlinkSync(claimPath);
+      } catch {
+        /* already removed */
+      }
     }
   }
 
@@ -540,9 +553,11 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
   readArtifact(workspaceId: string, idOrFilename: string): ArtifactEntry | null {
     const artifacts = this.listArtifacts(workspaceId);
     // ID takes precedence over filename (D6)
-    return artifacts.find((a) => a.id === idOrFilename)
-      ?? artifacts.find((a) => a.filename === idOrFilename)
-      ?? null;
+    return (
+      artifacts.find((a) => a.id === idOrFilename) ??
+      artifacts.find((a) => a.filename === idOrFilename) ??
+      null
+    );
   }
 
   deleteArtifact(workspaceId: string, id: string): void {
@@ -616,7 +631,16 @@ export class FileSystemWorkspaceStorage implements WorkspaceStorage {
     return { tracked, untracked, missing };
   }
 
-  checkpoint(id: string, input: CheckpointInput, addKnowledge?: (type: string, area: string, text: string, options: Record<string, unknown>) => string): CheckpointResult {
+  checkpoint(
+    id: string,
+    input: CheckpointInput,
+    addKnowledge?: (
+      type: string,
+      area: string,
+      text: string,
+      options: Record<string, unknown>,
+    ) => string,
+  ): CheckpointResult {
     const ws = this.readWorkspace(id);
     if (!ws) {
       throw new Error(`Workspace '${id}' not found`);
