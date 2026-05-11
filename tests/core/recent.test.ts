@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,7 +15,20 @@ function tmpBrain(): string {
   tmpDirs.push(d);
   return d;
 }
+
+// `FileSystemWorkspaceStorage.{get,set}ActiveWorkspaceId` route through the
+// process-wide /tmp session file when `KB_SESSION_ID` is set in the ambient
+// environment (the agent runtimes set it). Clear it so this in-process test
+// uses each temp brain's `.active` file — and, crucially, never writes to a
+// real session pointer. (Mirrors `withTempBrain` in tests/helpers.ts.)
+let savedSessionId: string | undefined;
+beforeEach(() => {
+  savedSessionId = process.env.KB_SESSION_ID;
+  delete process.env.KB_SESSION_ID;
+});
 afterEach(() => {
+  if (savedSessionId === undefined) delete process.env.KB_SESSION_ID;
+  else process.env.KB_SESSION_ID = savedSessionId;
   while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true });
 });
 
