@@ -1,11 +1,21 @@
 # Experiment: kb-verify
 
-**Source spec:** `src/tools/kb-verify.ts` — LLM-callable tool that marks an existing entry as verified (sets `provenance.status: 'verified'` + records date and source).
+**Source spec:** `src/tools/kb-verify.ts` — LLM-callable tool that marks an existing entry as verified (replaces `provenance` with `{ status: 'verified', date: <iso> }`; see "pinned behavior" below — no `source` is recorded, contrary to an earlier draft of this spec).
 **Implementation under test:** the trust-decay model's promote-half. New entries land with `provenance.status: 'unverified'`; staleness/age decay reduces their score. `kb_verify` is the LLM's path to ratchet an entry up the trust scale by attesting it (e.g., "I just confirmed this fact via reading the source").
 
 ## Status
 
-🚧 **Scaffolded — scenarios not yet implemented.** Tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md).
+✅ **Implemented.** All three scenarios GREEN against a real Pi runtime, each RED-proven:
+
+| Scenario | GREEN | RED-proof (mutated build) |
+|----------|-------|---------------------------|
+| `verify-by-id` | 15/15 | `MykbStore.verifyEntry` no-op → no update line appended; resolved provenance stays `unverified` with no date (and the fixture's `source` survives) — 4 assertions flip, `kb_verify` still "fires" |
+| `add-then-verify-roundtrip` | 14/14 | same `verifyEntry` no-op → step-1 add still lands but step-2 verify writes nothing; line count stays 1, resolved status `unverified` (3 assertions flip) |
+| `verify-unknown-id` | 14/14 | `findEntry` returns a stub instead of throwing → `verifyEntry` appends an update line (count 2) and `kb_verify` reports success instead of the "not found" error (2 assertions flip). The "no mutation" property is also L1-tested. |
+
+**Pinned behavior** (worth a kb gotcha if it ever changes): `verifyEntry` **replaces** provenance wholesale with `{ status: 'verified', date: <iso> }` — it does **not** populate a `source` field, and any prior `source` does not survive the verify.
+
+Tracked in [`docs/experiment-coverage.md`](../../docs/experiment-coverage.md).
 
 ## Intent
 
@@ -27,11 +37,11 @@ Layer 1 covers the happy path: given an entry id, mutate its provenance. The L4 
 
 The roundtrip scenario is the load-bearing one — proves the full add-then-attest workflow that lets a session simultaneously create AND ratchet trust on its own findings.
 
-## Notes (when implementing)
+## Implementation notes (as built)
 
-- **Two-step roundtrip** uses cycle 8's KB_SESSION_ID continuity. Step 1: kb_add returns the id → in the captured step JSON's `result` field. Step 2: extract the id and pass it to a kb_verify call.
-- **Provenance assertion** — check the JSONL line for the entry; the latest line for that id should have `"provenance":{"status":"verified", "date":"...", "source":"..."}`.
-- **The "source" field**: kb_verify should auto-populate it with something like `"verified by LLM during session <id>"`. Check current behavior and pin.
+- **Threading the id across steps.** There is no conversation carry-over between `step` calls — step 2 is a fresh Pi container. So the roundtrip scenario extracts the new entry's id from `areas/<id>/facts.jsonl` *between* the steps (the harness commits step 1's write before returning) and interpolates it into step 2's prompt. (`KB_SESSION_ID` continuity carries the *extension* state — loaded areas, signals — not the chat.)
+- **Provenance assertion.** `updateEntry` appends a new JSONL line (it doesn't rewrite), preserving the entry text. So the resolved entry is the *last* line whose text contains the marker; check `.provenance.status == "verified"` and `.provenance.date` non-empty on it. The original line stays at `"unverified"` — that's why a no-op `verifyEntry` is caught by a line-count assertion (1 vs 2) too.
+- **The `source` field — pinned NEGATIVE.** `verifyEntry` does *not* populate `provenance.source`, and a pre-existing `source` does *not* survive (provenance is replaced wholesale). `verify-by-id` seeds its fixture with `--source` and asserts the resolved entry has no `source` after verify, so a future change to either behavior is caught.
 
 ## Out of scope
 
