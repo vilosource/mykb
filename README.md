@@ -34,6 +34,11 @@ kb search "DNS"
 kb list
 kb stats
 
+# See what you worked on lately (across all workspaces/areas) — handy at session start
+kb recent          # last 2 days
+kb recent -d 7     # last week
+kb recent --all --git
+
 # Save to git
 kb save
 ```
