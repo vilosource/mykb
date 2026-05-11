@@ -255,4 +255,32 @@ describe('selectEntriesForInjection', () => {
       }
     });
   });
+
+  it('breaks score ties deterministically by area id (ascending)', async () => {
+    await withTempBrain(async (brainPath) => {
+      initBrain(brainPath);
+      const store = MykbStore.open(brainPath);
+      try {
+        // Each area's only entry is large enough that only one fits the budget.
+        const big = 'x'.repeat(8000);
+        store.addFact('zzz-area', `zzz ${big}`);
+        store.addFact('aaa-area', `aaa ${big}`);
+
+        // Equal scores; Map insertion order is REVERSE-alphabetical, so a
+        // sort that only compared scores would keep 'zzz-area' first.
+        const scoredAreas = new Map<string, number>();
+        scoredAreas.set('zzz-area', 7);
+        scoredAreas.set('aaa-area', 7);
+
+        const entries = selectEntriesForInjection(scoredAreas, store, 2000, new Set());
+
+        // The tie breaks on area id ascending -> 'aaa-area' is processed first
+        // and its (budget-filling) entry is the one selected.
+        expect(entries.has('aaa-area')).toBe(true);
+        expect(entries.has('zzz-area')).toBe(false);
+      } finally {
+        store.close();
+      }
+    });
+  });
 });

@@ -141,13 +141,16 @@ export function selectEntriesForInjection(
 
   if (scoredAreas.size === 0) return result;
 
-  // Apply sticky boost and sort by score descending
+  // Apply sticky boost and sort by score descending. Ties break on
+  // area id (ascending) so injection order is deterministic regardless
+  // of manifest/readdir order — the limited-budget eviction order must
+  // not depend on filesystem iteration order.
   const boosted: Array<{ area: string; score: number }> = [];
   for (const [area, score] of scoredAreas) {
     const boost = loadedAreas.has(area) ? STICKY_BOOST : 0;
     boosted.push({ area, score: score + boost });
   }
-  boosted.sort((a, b) => b.score - a.score);
+  boosted.sort((a, b) => b.score - a.score || a.area.localeCompare(b.area));
 
   let tokensUsed = 0;
 

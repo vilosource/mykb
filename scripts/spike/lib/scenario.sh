@@ -100,6 +100,16 @@ spike_run_scenario() {
     git checkout -q -b "e2e/$scenario" "e2e/source"
   )
 
+  # Clear the active-workspace pointer inherited from the cloned specimen.
+  # getActiveWorkspaceId() falls back to workspaces/.active when a session
+  # hasn't run `kb work start` (the kb-spike Pi container has KB_SESSION_ID
+  # set but no session file — see GH issue #5), so without this a scenario
+  # that doesn't create its own workspace would inherit whatever workspace
+  # the operator had active when they ran `kb-spike new` (and that area
+  # would get a WORKSPACE_BOOST in scoring). Scenarios that want an active
+  # workspace create one in prepare().
+  rm -f "${instance}/workspaces/.active" 2>/dev/null || true
+
   # Regenerate kb.db from the just-checked-out JSONL. kb.db is
   # gitignored, so a prior scenario's mutations stay in SQLite even
   # after switching branches — leaking state into the new scenario's

@@ -39,8 +39,8 @@ These belong to existing matrices but the matrix's behavior table flags them as 
 
 | Matrix | Gap | Notes |
 |---|---|---|
-| `area-scoring` | Sticky-area persistence across turns | An area loaded in turn N gets a sticky-boost in turn N+1. Now testable since file-backed `SessionState` (cycle 8) persists `loadedAreas`. |
-| `area-scoring` | Token-budget eviction order | When the 2000-token budget is exceeded, which areas keep their entries? Probably highest-scoring — but unverified end-to-end. |
+| `area-scoring` | Sticky-area persistence across turns | An area loaded in turn N gets a sticky-boost in turn N+1. Scenario attempted; **blocked** — [issue #6](https://github.com/vilosource/mykb/issues/6). |
+| `area-scoring` | Token-budget eviction order | When the 2000-token budget is exceeded, which areas keep their entries? Highest-scoring — `selectEntriesForInjection` now has a deterministic area-id tie-break, but the end-to-end scenario is **blocked** on the same investigation ([issue #6](https://github.com/vilosource/mykb/issues/6)). |
 
 ## Cross-cutting properties without an L4 home
 
