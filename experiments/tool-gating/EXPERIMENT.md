@@ -52,6 +52,8 @@ The current `tool-gating.ts` hook intercepts only the `write` and `edit` tool na
 
 The `bash-bypass-known-gap` scenario is the regression home for the fix. When any of the above lands, the scenario flips from 🐛 to ✅.
 
+**Decision (2026-05-11):** treated as a v2 design item (option 2 done properly — read-only mount + host-side validated-write daemon; the in-process extension can't enforce this below the app layer on its own). The app-layer hook stays as a guardrail for the cooperative-LLM case. Tracked as GitHub issue [#1](https://github.com/vilosource/mykb/issues/1) (`vilosource/mykb`); see also kb decision `Iw3j51Sr` on the `mykb` area for the issue-tracking model.
+
 ## Notes (when implementing)
 
 - **Synthetic file paths** must use the per-instance brainPath (`/home/node/.mykb` inside the container) so the host's real brain is never touched.

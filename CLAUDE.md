@@ -40,6 +40,17 @@ Key rules that are easy to miss:
 - **Combined RED+GREEN commits are OK for small changes** (<50 lines implementation), but never across features.
 - **The kb-spike harness control plane never calls `kb` directly.** Only scenarios call kb, and they call the per-experiment captured build (`<instance>/.e2e-build/cli.js`), not the host's `kb`. This keeps the harness usable when kb itself is broken on the working tree.
 
+## Issue tracking — hybrid model
+
+Work is tracked in the place where it's best surfaced. Don't collapse everything into one system, and keep the systems cross-linked so they don't drift.
+
+- **GitHub Issues + the `mykb` Project board** (`vilosource/mykb`, project [#2](https://github.com/users/vilosource/projects/2)) — cross-cutting and architectural backlog: v2 design work, infra/tooling debt, branch/merge decisions, anything without a natural home in an `EXPERIMENT.md`. A GH issue that mirrors an in-repo item must link to it (and the in-repo doc links back).
+- **`experiments/<feature>/EXPERIMENT.md` behavior matrices** — per-experiment status; the `🐛 KNOWN-FAIL` rows *are* the issue and its regression home. Indexed by `docs/experiment-coverage.md`.
+- **kb gotchas on the `mykb` area** — methodology gotchas and resolved-bug history.
+- **The `mykb` workspace handoff** (`kb work handoff`) — near-term session priorities; read on `kb work start mykb`.
+
+When you finish something tracked in two places, update both (close the GH issue *and* flip the `EXPERIMENT.md` row / clear the handoff item). Recorded as kb decision `Iw3j51Sr` on the `mykb` area and as a Claude Code memory entry (`project_mykb_hybrid_issue_tracking.md`).
+
 ## Build and Test
 
 ```bash
