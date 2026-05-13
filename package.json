@@ -35,14 +35,14 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^22.0.0",
-    "esbuild": "^0.25.12",
-    "eslint": "^9.0.0",
+    "@types/node": "^25.7.0",
+    "esbuild": "^0.28.0",
+    "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.0.0",
     "prettier": "^3.0.0",
-    "typescript": "^5.7.0",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.6"
   },
   "peerDependencies": {
     "@mariozechner/pi-agent-core": "*",
