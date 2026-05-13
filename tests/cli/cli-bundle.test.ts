@@ -9,8 +9,10 @@ const BUNDLE_DIR = path.join(PROJECT_ROOT, 'dist', 'cli-bundle');
 const BUNDLE_CLI = path.join(BUNDLE_DIR, 'cli.js');
 
 beforeAll(() => {
-  execSync('npm run bundle:cli', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 60000 });
-}, 60000);
+  // 3 min budget: bundle:cli does a fresh `npm install` inside dist/cli-bundle/
+  // which native-builds better-sqlite3; 60s is too tight on CI / cold cache.
+  execSync('npm run bundle:cli', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 180_000 });
+}, 180_000);
 
 function runBundledKb(
   args: string,
