@@ -9,9 +9,12 @@ const BUNDLE_DIR = path.join(PROJECT_ROOT, 'dist', 'cli-bundle');
 const BUNDLE_CLI = path.join(BUNDLE_DIR, 'cli.js');
 
 beforeAll(() => {
-  // 3 min budget: bundle:cli does a fresh `npm install` inside dist/cli-bundle/
-  // which native-builds better-sqlite3; 60s is too tight on CI / cold cache.
-  execSync('npm run bundle:cli', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 180_000 });
+  // CI pre-builds the bundle in a step before `npm test` (see ci.yml) so
+  // the native-build of better-sqlite3 doesn't block vitest's RPC heartbeat.
+  // Locally, fall through and build on-demand if it isn't there yet.
+  if (!fs.existsSync(BUNDLE_CLI)) {
+    execSync('npm run bundle:cli', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 180_000 });
+  }
 }, 180_000);
 
 function runBundledKb(

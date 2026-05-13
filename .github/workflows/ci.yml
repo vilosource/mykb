@@ -25,4 +25,9 @@ jobs:
       - run: npm ci --registry https://registry.npmjs.org
       - run: npm run lint
       - run: npm run build
+      # Pre-build the CLI bundle so the cli-bundle test's beforeAll
+      # finds dist/cli-bundle/ already populated. Without this, the
+      # 60-90s native-build of better-sqlite3 inside vitest's beforeAll
+      # blocks the worker RPC heartbeat and the run aborts.
+      - run: npm run bundle:cli
       - run: npm test
