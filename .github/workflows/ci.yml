@@ -17,6 +17,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Configure git identity (kb save shells out to git commit in tests)
+        run: |
+          git config --global user.email "ci@mykb.local"
+          git config --global user.name "mykb CI"
+
       - run: npm ci --registry https://registry.npmjs.org
       - run: npm run lint
       - run: npm run build
