@@ -4,29 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## `kb` vs `kb-develop` — never use the under-development CLI on the real brain
 
-**Operator activity** against the real `~/.mykb` brain (recording journal, handoff, gotchas, `kb save`, etc.) **must use `kb`** — the global binary npm-linked from `~/GitHub/mykb-stable/` (a git worktree on the `develop` branch).
+**Operator activity** against the real `~/.mykb` brain (recording journal, handoff, gotchas, `kb save`, etc.) **must use `kb`** — the global binary npm-linked from `~/GitHub/mykb-stable/` (a git worktree pinned at the latest release tag, detached HEAD).
 
 **Development of mykb itself** uses **`kb-develop`** — a wrapper at `~/.local/bin/kb-develop` that runs the feature-branch CLI from `~/GitHub/mykb/dist/cli/cli.js`. Use it only against experiment-instance brain clones (`~/.mykb-experiments/<id>/`) or temp dirs in unit/CLI tests. Never against the real `~/.mykb`.
 
-**Why**: the under-development branch may have unreleased changes whose workspace-ops or entry-add paths haven't been validated against production data. The kb-spike harness already isolates its container-side work via the captured CLI; this convention extends the same discipline to the developer's host shell.
+**Why**: the under-development branch may have unreleased changes whose workspace-ops or entry-add paths haven't been validated against production data. Pinning the stable tree at a release tag (rather than tracking `develop`) means the operator brain only sees CHANGELOG-vetted changes; the kb-spike harness already isolates its container-side work via the captured CLI, and this convention extends the same discipline to the developer's host shell.
 
-**Maintenance**: when `develop` advances, refresh the stable tree:
+**Maintenance**: when a new release is cut (release-please merges its release PR on `develop` and tags `vX.Y.Z`), refresh the stable tree to that tag:
 
 ```bash
 cd ~/GitHub/mykb-stable
-git pull
+git fetch --tags
+git checkout $(git tag --sort=-v:refname | head -n1)   # or: git checkout vX.Y.Z
 npm install
 npm run build && npm run bundle && npm run bundle:cli
 ```
 
-The `npm link` survives `git pull`; only re-link if something explicitly broke it (`cd ~/GitHub/mykb-stable && npm link`).
+The `npm link` survives checkout; only re-link if something explicitly broke it (`cd ~/GitHub/mykb-stable && npm link`).
 
 This convention is recorded as kb decision `bvWRQwIk` on the `mykb` area and as a Claude Code memory entry (`feedback_kb_vs_kb_develop_split.md`).
 
 ## Branches
 
-- **`develop`** — the integration branch and GitHub's default. CI (`.github/workflows/ci.yml`) runs on pushes/PRs to `develop`. There is no `main` on the remote; `develop` is it. The `~/GitHub/mykb-stable` worktree tracks `develop` (it backs the global `kb` binary — see above).
-- **Feature branches** — short-lived, branched off `develop`, merged back via fast-forward (or PR for larger changes), then **deleted** (local *and* remote). The `~/GitHub/mykb` worktree is the dev checkout — it sits on whatever feature branch is currently in flight (it does *not* track `develop`, since `develop` is checked out in `mykb-stable` and a branch can only be checked out in one worktree). `kb-develop` runs from `~/GitHub/mykb/dist/`.
+- **`develop`** — the integration branch and GitHub's default. CI (`.github/workflows/ci.yml`) runs on pushes/PRs to `develop`. There is no `main` on the remote; `develop` is it. release-please (`.github/workflows/release-please.yml`) watches `develop` and opens a `chore(develop): release X.Y.Z` PR aggregating conventional-commit history; merging that PR tags `vX.Y.Z` and creates a GitHub Release.
+- **Release tags (`vX.Y.Z`)** — the `~/GitHub/mykb-stable` worktree is pinned at the latest tag (detached HEAD) and backs the global `kb` binary. See the `kb` vs `kb-develop` section above for the refresh procedure.
+- **Feature branches** — short-lived, branched off `develop`, merged back via fast-forward (or PR for larger changes), then **deleted** (local *and* remote). The `~/GitHub/mykb` worktree is the dev checkout — it sits on whatever feature branch is currently in flight (it can freely check out `develop` too, since `mykb-stable` is on a detached tag and no longer holds the `develop` branch reservation). `kb-develop` runs from `~/GitHub/mykb/dist/`.
 - **Live design branches** — `feature/v2-design-docs` and `research/v2-harness-memory` carry v2 design/research work not yet on `develop`; leave them alone.
 - The pre-2026-05-11 leftover `feature/*` / `phase-w*` / `docs/*` branches (whose work was already integrated into `develop`) were deleted on 2026-05-11 as part of GH issue #3. Don't recreate the pattern: delete a feature branch once its work lands on `develop`.
 
