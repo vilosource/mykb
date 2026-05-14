@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/vilosource/mykb/compare/v0.2.0...v0.2.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **lock:** regenerate package-lock.json against public registry ([7688abe](https://github.com/vilosource/mykb/commit/7688abe68be9e6d02401c211c1c30c3269ab3719))
+
 ## [0.2.0](https://github.com/vilosource/mykb/compare/v0.1.0...v0.2.0) (2026-05-13)
 
 
