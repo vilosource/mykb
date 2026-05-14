@@ -2,17 +2,51 @@
   "name": "@vilosource/mykb",
   "version": "0.2.1",
   "type": "module",
-  "description": "Knowledge management system for AI coding agents",
+  "description": "Persistent, structured, git-native knowledge for AI coding agents. CLI + Pi extension; JSONL + SQLite hybrid storage; auto-injected context.",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "ai",
+    "agent",
+    "knowledge-base",
+    "memory",
+    "llm",
+    "cli",
+    "jsonl",
+    "sqlite",
+    "fts5"
   ],
+  "homepage": "https://github.com/vilosource/mykb#readme",
+  "bugs": {
+    "url": "https://github.com/vilosource/mykb/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vilosource/mykb.git"
+  },
+  "license": "MIT",
+  "author": "vilosource",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "kb": "./dist/cli/cli.js"
   },
   "files": [
-    "dist",
+    "dist/cli",
+    "dist/core",
+    "dist/extension",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map",
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/tools",
+    "dist/hooks",
+    "dist/package.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md"
   ],
   "pi": {
     "extensions": [
@@ -26,7 +60,8 @@
     "bundle:all": "npm run bundle && npm run bundle:cli",
     "test": "vitest run",
     "lint": "eslint . && prettier --check .",
-    "clean": "rm -rf dist coverage"
+    "clean": "rm -rf dist coverage",
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
