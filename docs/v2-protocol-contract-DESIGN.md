@@ -282,6 +282,23 @@ The CoR ordering (`SCHEMA_INVALID` → `ID_CONFLICT` → `TOMBSTONE_ORDER` → `
 
 The full testing pyramid (unit transport/validators → integration capability+handshake → contract error-taxonomy → scenario socket end-to-end) is therefore *specified by this contract*, not improvised in Phase 2.
 
+### 7.1 Phase 2 status (as built — PR #22)
+
+| Contract §7 item | Status |
+|---|---|
+| L1 framing (§4.1–4.3) + tests | ✅ `src/daemon/transport.ts`, 9 unit tests (round-trip, multibyte byte-count, oversize→BODY_TOO_LARGE encode+decode, partial-frame reassembly, coalesced, trailing-partial) |
+| JSON-RPC envelope (§4.2–4.3) | ✅ `src/daemon/jsonrpc.ts`, 12 unit tests |
+| Error taxonomy (§6) | ✅ `src/daemon/errors.ts` — full kind→code table; produced/asserted by the dispatch + scenario suites |
+| `hello` handshake (§4.4) | ✅ implemented as a normal verb; capability echoed |
+| Capability enforcement (§2.2) | ✅ per-verb gate + trust-cap, tested both capabilities incl. over the live socket |
+| **SO_PEERCRED resolver** | ⏭ **deferred to Phase 6.** Node exposes no public SO_PEERCRED API; faking it in the scaffold would be dishonest. Resolution is an injected Strategy seam (`DaemonOptions.resolveCapability`, DIP); the kernel-peer-uid resolver lands with the systemd/container topology where it belongs. Default = `operator` (trusted dev-mode, parent DESIGN §Dev-mode). |
+| L4 verbs → L3/core (§5) | ✅ full §5 surface wired except `area_stats` (needs MykbStore-internal db handle) and `rebuild` (CLI-inlined logic) → honestly UNSUPPORTED_OP via the CONTRACT_VERBS set, not faked |
+| **L2 StorageBackend Strategy contract suite** | ⏭ **deferred.** Parent DESIGN §L2 is explicit: "v2 day-1: LocalFsBackend only." The scaffold re-homes `src/core/*` directly (sanctioned re-homing, not rewriting); the reusable StorageBackend contract suite is extracted when a second backend (S3/NFS) is actually built (contract §8). |
+| Scenario e2e over real socket (capstone) | ✅ `tests/daemon/server.scenario.test.ts`, 4 scenario tests; representative verb of each group as operator + operator-only verb denied to agent over the wire + socket mode 0600 + split-write reassembly |
+| `supersede_entry` / envelope-v2 add-params | ⏭ wire-reserved per §3.1b/§8: `supersede_entry`→UNSUPPORTED_OP, `trust`/`validity`/`origin` accepted-but-not-persisted, until envelope-v2 phase 1 lands the schema. Trust-cap security check enforced now. |
+
+Pyramid as built: **53 daemon tests** — unit (transport 9 + jsonrpc 12) → integration (dispatch 17 + verbs 12) → scenario (server 4); full project sweep 634/634 green. The two ⏭ items are deferred *to a named later phase with a stated reason*, not skipped.
+
 ## 8. Deferred (explicitly not in this contract)
 
 - RBAC token model (§2.2) — additive `hello.params.token`, no protocol bump, build when a service-account curator needs sub-operator gating.
