@@ -30,6 +30,13 @@ export interface SelectedStore {
   store: KnowledgeStore;
   mode: StoreMode;
   socketPath?: string;
+  /**
+   * Release the underlying resource (local DB handle / RPC worker).
+   * `close()` is a lifecycle concern, deliberately NOT on the
+   * `KnowledgeStore` domain interface — the selection wrapper owns it so
+   * callers stay interface-pure.
+   */
+  close(): void;
 }
 
 function socketPathFor(brainPath: string): string {
@@ -40,15 +47,12 @@ export function selectKnowledgeStore(brainPath: string): SelectedStore {
   const forced = process.env.MYKB_STORE;
   const sock = socketPathFor(brainPath);
 
-  if (forced === 'local') {
-    return { store: MykbStore.open(brainPath), mode: 'local' };
+  const useRpc = forced === 'rpc' || (forced !== 'local' && fs.existsSync(sock));
+
+  if (useRpc) {
+    const store = new RpcKnowledgeStore(sock);
+    return { store, mode: 'rpc', socketPath: sock, close: () => store.close() };
   }
-  if (forced === 'rpc') {
-    return { store: new RpcKnowledgeStore(sock), mode: 'rpc', socketPath: sock };
-  }
-  // Auto-detect: presence of the socket is the signal (§2.4).
-  if (fs.existsSync(sock)) {
-    return { store: new RpcKnowledgeStore(sock), mode: 'rpc', socketPath: sock };
-  }
-  return { store: MykbStore.open(brainPath), mode: 'local' };
+  const store = MykbStore.open(brainPath);
+  return { store, mode: 'local', close: () => store.close() };
 }
