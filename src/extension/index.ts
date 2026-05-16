@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from './pi-types.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
 import { initBrain } from '../core/init.js';
-import { MykbStore } from '../core/knowledge-store.js';
 import { FileSystemWorkspaceStorage } from '../core/workspace.js';
+import { selectKnowledgeStore } from '../daemon/store-selection.js';
 import { SessionState } from './state.js';
 import { registerSessionHooks } from './hooks/session.js';
 import { registerTools } from '../tools/index.js';
@@ -23,7 +23,11 @@ export default function (pi: ExtensionAPI): void {
     initBrain(brainPath);
   }
 
-  const store = MykbStore.open(brainPath);
+  // v2: route through the daemon when its socket is bind-mounted in
+  // (container topology, contract §2.4); fall back to the in-process
+  // local store otherwise (host operator / no daemon). Both satisfy the
+  // KnowledgeStore interface so every hook below is unchanged (LSP).
+  const { store } = selectKnowledgeStore(brainPath);
   // SessionState.create() with KB_SESSION_ID enables persistence across
   // separate Pi container invocations that share the same session id —
   // signals seeded by a prior turn's input/tool events become visible

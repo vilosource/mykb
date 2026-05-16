@@ -1,5 +1,5 @@
 import { type AreaMetadata, type KnowledgeEntry, Zone } from '../core/types.js';
-import type { MykbStore } from '../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../core/types.js';
 import type { Signal } from './state.js';
 
 export type ScoreResult = {

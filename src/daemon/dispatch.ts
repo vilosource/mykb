@@ -40,6 +40,7 @@ import {
   ArtifactNotFoundError,
 } from '../core/errors.js';
 import { DaemonError } from './errors.js';
+import type { Zone } from '../core/types.js';
 import type { Capability, ConnContext } from './capability.js';
 
 const PROTOCOL = 1;
@@ -361,7 +362,12 @@ export class Dispatcher {
           });
         return { entry };
       }),
-      search: A((p) => ({ entries: this.store().search(str(p, 'query')) })),
+      search: A((p) => ({
+        entries: this.store().search(
+          str(p, 'query'),
+          optStr(p, 'exclude_zone') as Zone | undefined,
+        ),
+      })),
       match_areas: A((p) => ({ matches: this.store().matchAreas(str(p, 'text')) })),
 
       // --- workspace (§5.4) ---

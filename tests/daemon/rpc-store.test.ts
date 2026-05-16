@@ -9,6 +9,7 @@ import { createArea } from '../../src/core/area.js';
 import { MykbStore } from '../../src/core/knowledge-store.js';
 import { RpcKnowledgeStore } from '../../src/daemon/rpc-store.js';
 import { EntryNotFoundError } from '../../src/core/errors.js';
+import { Zone } from '../../src/core/types.js';
 
 // Phase 3 — RpcKnowledgeStore is the client-side Adapter behind the
 // EXISTING (synchronous) KnowledgeStore interface (decision: sync via a
@@ -110,6 +111,16 @@ describe('RpcKnowledgeStore — synchronous adapter over the wire', () => {
   it('reconstructs a typed core error from the wire error envelope', () => {
     const a = area('err');
     expect(() => store.updateEntry(a, 'no-such-id', { text: 'x' })).toThrow(EntryNotFoundError);
+  });
+
+  it('search honours the excludeZone arg over the wire (§5.3 exclude_zone)', () => {
+    const a = area('zone');
+    const keep = store.addFact(a, 'visible active fact');
+    const arch = store.addFact(a, 'old archived fact');
+    store.archiveEntry(a, arch);
+    const ids = store.search('fact', Zone.Archive).map((e) => e.id);
+    expect(ids).toContain(keep);
+    expect(ids).not.toContain(arch);
   });
 
   it('lifecycle verbs round-trip (verify/promote/archive/delete)', () => {

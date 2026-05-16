@@ -20,6 +20,7 @@ import type {
   AddPatternOptions,
   AddLinkOptions,
   EntryFilter,
+  Zone,
 } from '../core/types.js';
 import {
   EntryNotFoundError,
@@ -117,8 +118,12 @@ export class RpcKnowledgeStore implements KnowledgeStore {
   loadArea(area: string, filter?: EntryFilter): KnowledgeEntry[] {
     return (this.call('load_area', { area, filter }) as { entries: KnowledgeEntry[] }).entries;
   }
-  search(query: string): KnowledgeEntry[] {
-    return (this.call('search', { query }) as { entries: KnowledgeEntry[] }).entries;
+  search(query: string, excludeZone?: Zone): KnowledgeEntry[] {
+    return (
+      this.call('search', { query, exclude_zone: excludeZone }) as {
+        entries: KnowledgeEntry[];
+      }
+    ).entries;
   }
   matchAreas(text: string): { area: string; score: number }[] {
     return (

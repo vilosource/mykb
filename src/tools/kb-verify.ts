@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolResult } from '../extension/pi-types.js';
-import type { MykbStore } from '../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../core/types.js';
 
 type KbVerifyParams = {
   area: string;

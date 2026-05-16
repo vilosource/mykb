@@ -1,4 +1,4 @@
-import type { MykbStore } from '../../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../../core/types.js';
 import type { SessionState } from '../state.js';
 import type { AreaMetadata } from '../../core/types.js';
 import { readManifest } from '../../core/manifest.js';
