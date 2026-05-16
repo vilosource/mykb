@@ -59,6 +59,7 @@
     "bundle:cli": "node scripts/bundle-cli.mjs",
     "bundle:all": "npm run bundle && npm run bundle:cli",
     "test": "vitest run",
+    "daemon:dev": "npm run build && node dist/daemon/main.js",
     "lint": "eslint . && prettier --check .",
     "clean": "rm -rf dist coverage",
     "prepublishOnly": "npm run clean && npm run build"
