@@ -35,7 +35,14 @@ Decided: JSON-RPC 2.0 request/response objects, each frame length-prefixed (4-by
 - Length-prefix rather than newline-delimited: brain content (entry `text`, journal bodies, artifact content) contains arbitrary newlines; a newline delimiter would require escaping the payload. A byte count does not.
 - The `{ op, args, id }` "Command" framing the parent DESIGN's pattern table promises maps onto JSON-RPC's `{ method, params, id }` 1:1. `method` = the L4 verb (§5); `params` = a single named-object (never positional — positional params couple the wire to argument order, an LSP hazard when backends evolve).
 
-### 2.2 Auth model → **OS peer credentials (`SO_PEERCRED`), single socket, capability derived per-connection**
+### 2.2 Auth model → **OS-enforced capability; dual capability sockets (amended Phase 6)**
+
+> **AMENDED 2026-05-16 (Phase 6), per this doc's own change process** ("deviations require a revision to this doc, not an ad-hoc code decision", §1). **Forcing constraint:** Node.js exposes **no public `SO_PEERCRED` API** — the connecting peer's uid is not readable from a `net.Socket` without a native addon, which is against the project's deps-minimal ethos. **Resolution:** keep the *security property* (capability is kernel-attested, never client-asserted) but realize it through **two capability sockets** instead of one socket + `SO_PEERCRED`:
+>
+> - **operator socket** — created mode `0600`, owned by the brain uid. The kernel permits only the brain-owning uid to `connect()`. A connection here ⇒ `operator` capability.
+> - **agent socket** — the one bind-mounted into the Pi container (Phase 6 topology). A connection here ⇒ `agent` capability; asserted `trust` capped at `agent` (§3.1a).
+>
+> This is **not an ad-hoc deviation**: the parent DESIGN §Operator-vs-extension explicitly sanctioned "operator commands gated by a different token / **socket** / capability", and §2.2's own text below already said splitting is protocol-compatible. The kernel still attests identity (filesystem-perms `connect()` enforcement instead of `SO_PEERCRED` readout); the daemon still never trusts a client-asserted capability. The capability resolver remains the injected Strategy seam (`DaemonOptions.resolveCapability`) decided in Phase 2 — the dual-socket resolver is one implementation of it; a future native-`SO_PEERCRED` single-socket resolver could replace it with no contract change. Single-socket dev-mode (default → `operator`) is retained for the host operator / tests (parent DESIGN §Dev-mode). The original single-socket+`SO_PEERCRED` text is kept below for design history.
 
 Decided: day-1 is OS perms, but *refined* beyond the parent DESIGN's "socket file mode + bind-mount" because envelope-v2's `trust` field (§3.1) forces the daemon to distinguish operator-capable connections from extension connections.
 
@@ -291,7 +298,7 @@ The full testing pyramid (unit transport/validators → integration capability+h
 | Error taxonomy (§6) | ✅ `src/daemon/errors.ts` — full kind→code table; produced/asserted by the dispatch + scenario suites |
 | `hello` handshake (§4.4) | ✅ implemented as a normal verb; capability echoed |
 | Capability enforcement (§2.2) | ✅ per-verb gate + trust-cap, tested both capabilities incl. over the live socket |
-| **SO_PEERCRED resolver** | ⏭ **deferred to Phase 6.** Node exposes no public SO_PEERCRED API; faking it in the scaffold would be dishonest. Resolution is an injected Strategy seam (`DaemonOptions.resolveCapability`, DIP); the kernel-peer-uid resolver lands with the systemd/container topology where it belongs. Default = `operator` (trusted dev-mode, parent DESIGN §Dev-mode). |
+| ~~SO_PEERCRED resolver~~ → **dual capability sockets** | ✅ **Resolved Phase 6** (§2.2 amended). Node has no public SO_PEERCRED API, so capability is established by *which socket* a connection arrives on, kernel-enforced by `connect()` perms: operator socket `0600` (brain uid) vs agent socket `0666` (container, capability-capped). `DualSocketDaemon` (`src/daemon/dual-socket.ts`), 4 tests; single-socket dev default retained. Reference `deploy/mykbd.service` + `docs/v2-container-topology.md`. |
 | L4 verbs → L3/core (§5) | ✅ full §5 surface wired except `area_stats` (needs MykbStore-internal db handle) and `rebuild` (CLI-inlined logic) → honestly UNSUPPORTED_OP via the CONTRACT_VERBS set, not faked |
 | **L2 StorageBackend Strategy contract suite** | ⏭ **deferred.** Parent DESIGN §L2 is explicit: "v2 day-1: LocalFsBackend only." The scaffold re-homes `src/core/*` directly (sanctioned re-homing, not rewriting); the reusable StorageBackend contract suite is extracted when a second backend (S3/NFS) is actually built (contract §8). |
 | Scenario e2e over real socket (capstone) | ✅ `tests/daemon/server.scenario.test.ts`, 4 scenario tests; representative verb of each group as operator + operator-only verb denied to agent over the wire + socket mode 0600 + split-write reassembly |

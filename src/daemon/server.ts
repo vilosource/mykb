@@ -29,6 +29,13 @@ export interface DaemonOptions {
   socketPath: string;
   /** Strategy seam for §2.2 capability resolution; default → 'operator'. */
   resolveCapability?: (socket: net.Socket) => Capability;
+  /** Socket file mode; default 0600 (operator-only connect, §2.2). */
+  socketMode?: number;
+  /**
+   * Share one Dispatcher across listeners (used by DualSocketDaemon so
+   * both capability sockets serve the same brain through one process).
+   */
+  dispatcher?: Dispatcher;
 }
 
 export class MykbDaemon {
@@ -38,7 +45,7 @@ export class MykbDaemon {
 
   constructor(opts: DaemonOptions) {
     this.opts = opts;
-    this.dispatcher = new Dispatcher(opts.brainPath);
+    this.dispatcher = opts.dispatcher ?? new Dispatcher(opts.brainPath);
   }
 
   listen(): Promise<void> {
@@ -51,9 +58,10 @@ export class MykbDaemon {
     return new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(this.opts.socketPath, () => {
-        // 0600: only the brain-owning uid may even connect (defence in
-        // depth; capability still derives from SO_PEERCRED, not the mode).
-        fs.chmodSync(this.opts.socketPath, 0o600);
+        // Default 0600: only the brain-owning uid may connect (the
+        // operator-capability kernel gate, §2.2 amended). The agent
+        // socket overrides this to be container-connectable.
+        fs.chmodSync(this.opts.socketPath, this.opts.socketMode ?? 0o600);
         server.off('error', reject);
         resolve();
       });

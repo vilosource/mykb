@@ -1,16 +1,23 @@
 /**
- * `mykbd` entrypoint — `docs/v2-protocol-contract-DESIGN.md` §4.1.
+ * `mykbd` entrypoint — `docs/v2-protocol-contract-DESIGN.md` §4.1 / §2.2.
  *
- * Dev-mode launcher (parent DESIGN §Dev-mode strategy: `npm run
- * daemon:dev`). Production supervision (systemd) and the SO_PEERCRED
- * capability resolver are Phase 6 deliverables; this entrypoint runs the
- * daemon against the operator's own brain with the default (operator)
- * capability, which is exactly the trusted dev-mode contract.
+ * Two modes:
+ *
+ *  - **dev / single-socket** (default, `npm run daemon:dev`): one socket,
+ *    `operator` capability — the trusted host-operator loop (parent
+ *    DESIGN §Dev-mode).
+ *  - **production / dual-socket**: set `MYKB_OPERATOR_SOCKET` +
+ *    `MYKB_AGENT_SOCKET`. The operator socket (0600) is host-local; the
+ *    agent socket (0666) is the one bind-mounted into the Pi container.
+ *    Capability is decided by which socket the connection arrives on
+ *    (§2.2 amended — no SO_PEERCRED needed). Run under systemd
+ *    (`deploy/mykbd.service`); see `docs/v2-container-topology.md`.
  */
 
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { MykbDaemon } from './server.js';
+import { DualSocketDaemon } from './dual-socket.js';
 
 function defaultBrainPath(): string {
   return process.env.MYKB_DIR ?? path.join(os.homedir(), '.mykb');
@@ -20,12 +27,33 @@ function defaultSocketPath(brainPath: string): string {
   return process.env.MYKB_SOCKET ?? path.join(brainPath, '.mykbd.sock');
 }
 
+interface Runnable {
+  listen(): Promise<void>;
+  close(): Promise<void>;
+}
+
 export async function main(): Promise<void> {
   const brainPath = defaultBrainPath();
-  const socketPath = defaultSocketPath(brainPath);
-  const daemon = new MykbDaemon({ brainPath, socketPath });
+  const op = process.env.MYKB_OPERATOR_SOCKET;
+  const ag = process.env.MYKB_AGENT_SOCKET;
+
+  let daemon: Runnable;
+  let banner: string;
+  if (op && ag) {
+    daemon = new DualSocketDaemon({
+      brainPath,
+      operatorSocketPath: op,
+      agentSocketPath: ag,
+    });
+    banner = `mykbd (dual-socket) operator=${op} agent=${ag} (brain: ${brainPath})`;
+  } else {
+    const socketPath = defaultSocketPath(brainPath);
+    daemon = new MykbDaemon({ brainPath, socketPath });
+    banner = `mykbd (single-socket, operator) ${socketPath} (brain: ${brainPath})`;
+  }
+
   await daemon.listen();
-  console.error(`mykbd listening on ${socketPath} (brain: ${brainPath})`);
+  console.error(banner);
 
   const shutdown = () => {
     daemon
