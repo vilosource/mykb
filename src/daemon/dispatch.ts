@@ -32,6 +32,7 @@ import {
 } from '../core/area.js';
 import { regenerateManifest, readManifest } from '../core/manifest.js';
 import { save } from '../core/save.js';
+import { getRecentActivity } from '../core/recent.js';
 import {
   EntryNotFoundError,
   WorkspaceNotFoundError,
@@ -42,6 +43,80 @@ import { DaemonError } from './errors.js';
 import type { Capability, ConnContext } from './capability.js';
 
 const PROTOCOL = 1;
+
+/**
+ * The canonical L4 verb set (contract §5). Membership drives the
+ * UNSUPPORTED_OP-vs-METHOD_NOT_FOUND distinction (§6): a name here that
+ * has no handler yet is "reserved by the contract, backend can't do it
+ * yet"; a name not here at all is genuinely unknown.
+ */
+const CONTRACT_VERBS = new Set<string>([
+  // system §5.7
+  'hello',
+  'ping',
+  'daemon_info',
+  // knowledge add §5.1
+  'add_fact',
+  'add_decision',
+  'add_gotcha',
+  'add_pattern',
+  'add_link',
+  // knowledge lifecycle §5.2
+  'update_entry',
+  'delete_entry',
+  'verify_entry',
+  'promote_entry',
+  'archive_entry',
+  'supersede_entry',
+  // knowledge read §5.3
+  'load_area',
+  'get_entry',
+  'search',
+  'match_areas',
+  'list_entries',
+  // workspace §5.4
+  'create_workspace',
+  'read_workspace',
+  'resolve_workspace_id',
+  'update_workspace_state',
+  'update_workspace_links',
+  'link_area',
+  'unlink_area',
+  'list_workspaces',
+  'archive_workspace',
+  'get_active_workspace',
+  'set_active_workspace',
+  'clear_active_workspace',
+  'append_journal',
+  'read_journal',
+  'append_note',
+  'read_notes',
+  'delete_note',
+  'write_handoff',
+  'read_handoff',
+  'clear_handoff',
+  // artifacts §5.5
+  'add_artifact',
+  'read_artifact',
+  'read_artifact_content',
+  'update_artifact',
+  'delete_artifact',
+  'list_artifacts',
+  'sync_artifacts',
+  // area & maintenance §5.6
+  'init_area',
+  'read_area_metadata',
+  'update_area_metadata',
+  'list_areas',
+  'delete_area',
+  'regenerate_manifest',
+  'read_manifest',
+  'compact',
+  'rebuild',
+  'area_stats',
+  'recent_activity',
+  'save',
+]);
 
 type Params = Record<string, unknown>;
 type Handler = (p: Params, ctx: ConnContext) => unknown;
@@ -126,6 +201,10 @@ export class Dispatcher {
   dispatch(method: string, params: Params, ctx: ConnContext): unknown {
     const def = this.verbs[method];
     if (!def) {
+      // Contract-fidelity rule (§6): a verb that IS in the contract but is
+      // not wired by this backend is UNSUPPORTED_OP; a verb that is not in
+      // the contract at all is METHOD_NOT_FOUND.
+      if (CONTRACT_VERBS.has(method)) this.unsupported(method);
       throw new DaemonError('METHOD_NOT_FOUND', `unknown verb: ${method}`, { method });
     }
     if (def.cap === 'O' && ctx.capability !== 'operator') {
@@ -291,14 +370,37 @@ export class Dispatcher {
         return {};
       }),
       read_workspace: A((p) => ({ workspace: this.ws().readWorkspace(str(p, 'id')) })),
+      resolve_workspace_id: A((p) => ({
+        id: this.ws().resolveWorkspaceId(str(p, 'id')),
+      })),
       list_workspaces: A(() => ({ workspaces: this.ws().listWorkspaces() })),
       update_workspace_state: A((p) => {
         this.ws().updateWorkspaceState(str(p, 'id'), (p.state ?? {}) as never);
         return {};
       }),
+      update_workspace_links: A((p) => {
+        this.ws().updateWorkspaceLinks(str(p, 'id'), (p.links ?? {}) as never);
+        return {};
+      }),
+      link_area: A((p) => {
+        this.ws().linkArea(str(p, 'id'), str(p, 'area'));
+        return {};
+      }),
+      unlink_area: A((p) => {
+        this.ws().unlinkArea(str(p, 'id'), str(p, 'area'));
+        return {};
+      }),
+      archive_workspace: A((p) => {
+        this.ws().archiveWorkspace(str(p, 'id'));
+        return {};
+      }),
       get_active_workspace: A(() => ({ id: this.ws().getActiveWorkspaceId() })),
       set_active_workspace: A((p) => {
         this.ws().setActiveWorkspaceId(str(p, 'id'));
+        return {};
+      }),
+      clear_active_workspace: A(() => {
+        this.ws().clearActiveWorkspaceId();
         return {};
       }),
       append_journal: A((p) => {
@@ -321,11 +423,47 @@ export class Dispatcher {
       read_notes: A((p) => ({
         notes: this.ws().readNotes(str(p, 'id'), optStr(p, 'tag')),
       })),
+      delete_note: A((p) => {
+        this.ws().deleteNote(str(p, 'id'), str(p, 'note_id'));
+        return {};
+      }),
       write_handoff: A((p) => {
         this.ws().writeHandoff(str(p, 'id'), str(p, 'text'));
         return {};
       }),
       read_handoff: A((p) => ({ handoff: this.ws().readHandoff(str(p, 'id')) })),
+      clear_handoff: A((p) => {
+        this.ws().clearHandoff(str(p, 'id'));
+        return {};
+      }),
+
+      // --- artifacts (§5.5) ---
+      add_artifact: A((p) => ({
+        id: this.ws().addArtifact(
+          str(p, 'workspace_id'),
+          str(p, 'filename'),
+          str(p, 'content'),
+          (p.options ?? undefined) as never,
+        ),
+      })),
+      read_artifact: A((p) => ({
+        artifact: this.ws().readArtifact(str(p, 'workspace_id'), str(p, 'id_or_filename')),
+      })),
+      read_artifact_content: A((p) => ({
+        content: this.ws().readArtifactContent(str(p, 'workspace_id'), str(p, 'id_or_filename')),
+      })),
+      update_artifact: A((p) => {
+        this.ws().updateArtifact(str(p, 'workspace_id'), str(p, 'id'), (p.updates ?? {}) as never);
+        return {};
+      }),
+      delete_artifact: A((p) => {
+        this.ws().deleteArtifact(str(p, 'workspace_id'), str(p, 'id'));
+        return {};
+      }),
+      list_artifacts: A((p) => ({
+        artifacts: this.ws().listArtifacts(str(p, 'workspace_id')),
+      })),
+      sync_artifacts: A((p) => this.ws().syncArtifacts(str(p, 'workspace_id'))),
 
       // --- area & maintenance (§5.6) ---
       init_area: O((p) => {
@@ -346,6 +484,13 @@ export class Dispatcher {
         return {};
       }),
       read_manifest: A(() => ({ manifest: readManifest(this.brainPath) })),
+      recent_activity: A((p) =>
+        getRecentActivity(this.brainPath, this.ws(), {
+          days: typeof p.days === 'number' ? p.days : undefined,
+          since: optStr(p, 'since'),
+          all: p.all === true,
+        }),
+      ),
       compact: O((p) => {
         this.store().compact(optStr(p, 'area'));
         return {};
