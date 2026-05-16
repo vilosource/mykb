@@ -1,5 +1,5 @@
 import type { CommandHandler, ExtensionAPI } from '../pi-types.js';
-import type { MykbStore } from '../../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../../core/types.js';
 import type { SessionState } from '../state.js';
 import { type KnowledgeEntry, Zone } from '../../core/types.js';
 import { renderMarkdown } from '../../core/render.js';

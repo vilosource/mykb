@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolResult } from '../extension/pi-types.js';
-import type { MykbStore } from '../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../core/types.js';
 import type { EntryType } from '../core/types.js';
 import { ProvenanceStatus, Zone } from '../core/types.js';
 

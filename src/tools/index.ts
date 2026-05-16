@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from '../extension/pi-types.js';
-import type { MykbStore } from '../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../core/types.js';
 import type { WorkspaceStorage } from '../core/types.js';
 import { registerKbAdd } from './kb-add.js';
 import { registerKbSearch } from './kb-search.js';

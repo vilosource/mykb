@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ToolResult } from '../extension/pi-types.js';
-import type { MykbStore } from '../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../core/types.js';
 import { Zone } from '../core/types.js';
 import { renderMarkdown } from '../core/render.js';
 

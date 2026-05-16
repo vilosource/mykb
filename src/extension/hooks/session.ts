@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from '../pi-types.js';
 import type { BeforeAgentStartResult } from '../pi-types.js';
-import type { MykbStore } from '../../core/knowledge-store.js';
+import type { KnowledgeStore as MykbStore } from '../../core/types.js';
 import type { SessionState } from '../state.js';
 import { initBrain } from '../../core/init.js';
 import { isDirtyShutdown, recoverDirtyShutdown } from '../../core/init.js';

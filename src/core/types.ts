@@ -163,7 +163,7 @@ export interface KnowledgeStore {
   promoteEntry(area: string, id: string): void;
   archiveEntry(area: string, id: string): void;
   loadArea(area: string, filter?: EntryFilter): KnowledgeEntry[];
-  search(query: string): KnowledgeEntry[];
+  search(query: string, excludeZone?: Zone): KnowledgeEntry[];
   matchAreas(text: string): { area: string; score: number }[];
   compact(area?: string): void;
 }
