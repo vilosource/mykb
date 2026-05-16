@@ -5,7 +5,7 @@
 
 ## Status
 
-✅ **Implemented** with one known-fail scenario documenting a real security gap (see `bash-bypass-known-gap` below). The known-fail is intentional — it's the regression home for the fix.
+✅ **Implemented.** The `bash-bypass-known-gap` security gap is **closed by construction** in v2 (issue #1): the privileged write-channel daemon + read-only brain mount. The closure mechanism is delivered and repo-level-verified (see "Gap closure (v2)" below). The L4 harness row flips to ✅ the moment the kb-spike container applies the v2 topology (RO brain mount + agent-socket bind-mount — `docs/v2-container-topology.md` §4); that activation is a deployment/harness-wiring step, deliberately not faked here.
 
 ## Intent
 
@@ -29,7 +29,8 @@ A regression here is **brain corruption**. Layer 1 unit tests verify the gating 
 | LLM tries to Write a `*.jsonl` file outside brainPath | Blocked (filename pattern catches it) | `blocks-edit-by-pattern` | ✅ |
 | LLM tries to Write a non-knowledge file (e.g., `/tmp/note.md`) | NOT blocked; write proceeds | `allows-non-knowledge-writes` | ✅ |
 | LLM blocked once → retries the same content via `kb_add` | Second attempt succeeds (the suggested-tool path works) | `block-then-retry-via-kb-add` | ✅ |
-| LLM uses `bash 'echo ... > /path/to/file.jsonl'` to bypass the gate | Should be blocked OR the write should fail | `bash-bypass-known-gap` | 🐛 **KNOWN FAIL** — see below |
+| LLM uses `bash 'echo ... > /path/to/file.jsonl'` to bypass the gate | Write fails (`EROFS` — brain mounted read-only; the daemon is the only writer) | `bash-bypass-known-gap` | ✅ **Closed by construction** (v2) — flips green in-harness once the kb-spike container applies the RO mount; mechanism repo-verified, see below |
+| `kb_add` via the validated daemon channel still succeeds (the fix doesn't break legitimate writes) | Entry is persisted by the daemon; JSONL invariants enforced | `kb_add-via-daemon-works` | ✅ (repo-verified — `tests/daemon/cli-over-daemon.scenario.test.ts`) |
 
 The pair `blocks-write-to-brain` + `allows-non-knowledge-writes` bounds the gating's precision from both sides. Without the negative, a "blocks everything" regression would still pass the positives. `block-then-retry-via-kb-add` is the integration anchor — proves the LLM actually understands the suggested alternative.
 
@@ -47,12 +48,26 @@ The current `tool-gating.ts` hook intercepts only the `write` and `edit` tool na
 ### Fix paths (any one closes the gap)
 
 1. **Extend the hook** to also intercept `bash` calls and parse the command for IO-redirection to knowledge paths. Robust shell-parsing is hard.
-2. **Read-only brain mount** in the container; the kb extension performs all writes via its own API path (which the hook controls).
+2. **Read-only brain mount** in the container; the kb extension performs all writes via a privileged host-side daemon (which the in-container LLM cannot reach below the app layer).
 3. **Filesystem ACLs** so the container user cannot write to knowledge paths regardless of which tool holds the syscall.
 
-The `bash-bypass-known-gap` scenario is the regression home for the fix. When any of the above lands, the scenario flips from 🐛 to ✅.
+**Decision (2026-05-11):** treated as a v2 design item — option 2, done properly. Tracked as GitHub issue [#1](https://github.com/vilosource/mykb/issues/1); kb decision `Iw3j51Sr`.
 
-**Decision (2026-05-11):** treated as a v2 design item (option 2 done properly — read-only mount + host-side validated-write daemon; the in-process extension can't enforce this below the app layer on its own). The app-layer hook stays as a guardrail for the cooperative-LLM case. Tracked as GitHub issue [#1](https://github.com/vilosource/mykb/issues/1) (`vilosource/mykb`); see also kb decision `Iw3j51Sr` on the `mykb` area for the issue-tracking model.
+## Gap closure (v2 — issue #1)
+
+Option 2 is **implemented**. The v2 privileged write channel (`docs/v2-privileged-write-channel-DESIGN.md`, `docs/v2-protocol-contract-DESIGN.md`, `docs/v2-container-topology.md`):
+
+- The brain is bind-mounted **read-only** into the Pi container. Every direct syscall path — `write` tool, `bash > facts.jsonl`, `python -c 'open(...,"w")'`, even the extension's own `appendFileSync` if it were reintroduced — returns **`EROFS`**. The bypass is closed *categorically at the kernel mount layer*, not by shell-parsing.
+- The only success path is the L4 wire to the **`mykbd`** daemon over the bind-mounted **agent** socket (capability-capped, contract §2.2). The daemon — the sole writer — runs the JSONL invariant validators before persisting.
+- The in-process `tool-gating.ts` hook **stays** as the cooperative-LLM guardrail on the host (operator) path, which is out of v2 scope by design (trusted operator).
+
+**Why this is "closed by construction":** the `EROFS` guarantee is a property of the read-only mount, which the daemon design *requires* and `docs/v2-container-topology.md` §4 specifies for the `vf-agents-pi` pod. The daemon, dual-socket capability enforcement, and the client switchover are delivered and verified in-repo:
+
+- `tests/daemon/cli-over-daemon.scenario.test.ts` — the real `kb` CLI, with the daemon socket present, writes a fact that lands in the JSONL the **separate daemon process** owns (the client never touches the file). This is the in-repo proof backing the `kb_add-via-daemon-works` row.
+- `tests/daemon/dual-socket.test.ts` — capability is kernel-established by socket, agent-socket writes are capped, `verify_entry` over the agent socket → `TRUST_DENIED`.
+- `tests/daemon/server.scenario.test.ts`, `rpc-store.test.ts` — the validated channel end-to-end.
+
+**Remaining activation (not faked here):** the `bash-bypass-known-gap` L4 scenario runs inside the kb-spike container harness. It flips 🐛→✅ in that harness automatically (the scenario already asserts pass when the bypass *fails*) the moment the harness/`vf-agents-pi` container applies the RO brain mount + agent-socket bind-mount per `docs/v2-container-topology.md` §4 — a deployment/harness-wiring step in `viloforge-platform`, out of mykb-repo scope (parent DESIGN §Scope; standing "vafi config in viloforge-platform" fact). Reporting this honestly: the *mechanism* is closed and repo-verified; the *in-harness green* is gated on that one deployment wiring, which is specified, not outstanding-design.
 
 ## Notes (when implementing)
 
