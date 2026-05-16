@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { readVersion } from './version.js';
 import { initBrain } from '../core/init.js';
 import { resolveBrainPath, brainExists } from '../core/config.js';
-import { MykbStore } from '../core/knowledge-store.js';
+import type { KnowledgeStore } from '../core/types.js';
+import { selectKnowledgeStore } from '../daemon/store-selection.js';
 import {
   createArea,
   listAreas,
@@ -50,13 +51,17 @@ function requireBrain(): string {
   return bp;
 }
 
-function withStore<T>(fn: (store: MykbStore) => T): T {
+function withStore<T>(fn: (store: KnowledgeStore) => T): T {
   const bp = requireBrain();
-  const store = MykbStore.open(bp);
+  // Contract §2.4: when the daemon is running the operator CLI must use
+  // the RPC store (else two writers race ~/.mykb); when it is not,
+  // LocalMykbStore is the direct-disk operator path. selectKnowledgeStore
+  // encodes exactly that policy.
+  const { store, close } = selectKnowledgeStore(bp);
   try {
     return fn(store);
   } finally {
-    store.close();
+    close();
   }
 }
 
@@ -824,7 +829,7 @@ workCmd
 
     // Build addKnowledge callback using the store
     const bp = requireBrain();
-    const store = MykbStore.open(bp);
+    const { store, close: closeStore } = selectKnowledgeStore(bp);
     const addKnowledge = (
       type: string,
       area: string,
@@ -846,7 +851,7 @@ workCmd
     };
 
     const result = storage.checkpoint(activeId, input, addKnowledge);
-    store.close();
+    closeStore();
 
     // Report
     const parts: string[] = [];
