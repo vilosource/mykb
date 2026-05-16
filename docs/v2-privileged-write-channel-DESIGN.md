@@ -253,6 +253,8 @@ The daemon ships with an `npm run daemon:dev` target for quick local startup aga
 
 ## Open decisions
 
+> **RESOLVED — all six decided in `v2-protocol-contract-DESIGN.md` §2 (Phase 1, landed 2026-05-16).** Summary: (1) JSON-RPC 2.0 over length-prefixed Unix socket; (2) OS peer-credentials (`SO_PEERCRED`) capability, single socket, token deferred; (3) fail-fast + cooperative-path fallback; (4) daemon sole-writer with socket-presence detection + defensive flock; (5) verb set canonicalized in that doc §5; (6) supervision deferred to Phase 6. The list below is retained for design-history; the contract doc is authoritative.
+
 Decisions that remain after this design pass — to be resolved before implementation begins:
 
 1. **Wire protocol shape** — JSON-RPC 2.0 over Unix socket, HTTP-over-Unix-socket (gives free middleware ecosystem, but heavier), or custom length-prefixed JSON framing. Lean: JSON-RPC 2.0 for ecosystem fit; defer until prototyping.
@@ -297,7 +299,9 @@ Phases 2–7 are roughly the v2 implementation window for this commitment. Phase
 
 ## Open questions for v2 implementation start
 
-To resurface before phase 2:
+> **ANSWERED — `v2-protocol-contract-DESIGN.md` §3 (Phase 1, 2026-05-16).** (1) **Yes**, envelope-v2 changes the L3 schema with three concrete L4 effects (trust must move client→wire and be capped by connection capability; `supersede_entry` is a first-class atomic verb; `verify` becomes the operator-trust-upgrade signal + query verbs gain validity filters) — all foldable additively with no protocol-version bump. (2) **No** new unattended host runtime; container-only scope holds. (3) **No** new direct write-client; `mykb-curator` proposes via git PR, not the socket — noted as the most likely future L4 client.
+
+Resurfaced and answered before phase 2:
 
 - Have any of the §16 commitments (envelope-v2, two-stage retrieval, etc.) changed the L3 schema in ways that affect this design's L4 verb set?
 - Is there a concrete second harness in play that pushes operator-host enforcement (out-of-scope today) back into scope?
