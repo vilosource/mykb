@@ -1,0 +1,48 @@
+# mykbd — v2 privileged write channel daemon (systemd unit, reference)
+#
+# Phase 6 of docs/v2-privileged-write-channel-DESIGN.md. The daemon is the
+# ONLY process with write capability to the brain on disk; the Pi
+# container mounts the brain read-only and reaches the daemon solely
+# through the bind-mounted agent socket.
+#
+# Install: copy to /etc/systemd/system/mykbd.service, adjust the
+# placeholders, then: systemctl daemon-reload && systemctl enable --now mykbd
+#
+# See docs/v2-container-topology.md for the full topology + the
+# viloforge-platform integration seam.
+
+[Unit]
+Description=mykbd — mykb privileged write-channel daemon
+After=network.target
+
+[Service]
+Type=simple
+
+# Runs as the BRAIN-OWNING user. This uid owns ~/.mykb and the operator
+# socket (0600) — it is the kernel-attested "operator" capability (§2.2).
+User=%i
+
+Environment=MYKB_DIR=%h/.mykb
+# Dual-socket production mode (contract §2.2 amended):
+#   operator socket: host-local, 0600, this user only
+#   agent socket:    bind-mounted into the Pi container, 0666, agent-capped
+Environment=MYKB_OPERATOR_SOCKET=%h/.mykb/.mykbd-operator.sock
+Environment=MYKB_AGENT_SOCKET=/run/mykbd/agent.sock
+
+# /run/mykbd is the host-side directory bind-mounted into the container.
+RuntimeDirectory=mykbd
+RuntimeDirectoryMode=0755
+
+ExecStart=/usr/bin/node /opt/mykb/dist/daemon/main.js
+Restart=on-failure
+RestartSec=2
+
+# Hardening: the daemon needs write to ~/.mykb and /run/mykbd only.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.mykb /run/mykbd
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
