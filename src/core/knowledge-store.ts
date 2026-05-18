@@ -12,7 +12,7 @@ import { appendEntry, writeTombstone, compactEntries } from './store.js';
 import { ensureFresh } from './hydrate.js';
 import { listAreas as listAreaDirs } from './area.js';
 import { generateId } from './id.js';
-import { EntryNotFoundError } from './errors.js';
+import { EntryNotFoundError, EntryValidationError } from './errors.js';
 import type {
   KnowledgeStore,
   KnowledgeEntry,
@@ -106,12 +106,20 @@ export class MykbStore implements KnowledgeStore {
   }
 
   verifyEntry(area: string, id: string): void {
-    this.updateEntry(area, id, {
+    const updates: Partial<KnowledgeEntry> = {
       provenance: {
         status: ProvenanceStatus.Verified,
         date: nowIso(),
       },
-    });
+    };
+    // Decision ei2k4oZF: 'incoming' is by definition unverified +
+    // quarantined. Verifying it falsifies the predicate that placed
+    // it there, so it must leave — release it to 'active'. Verify on
+    // any other zone is provenance-only (unchanged).
+    if (this.findEntry(area, id).zone === Zone.Incoming) {
+      updates.zone = Zone.Active;
+    }
+    this.updateEntry(area, id, updates);
   }
 
   promoteEntry(area: string, id: string): void {
@@ -193,6 +201,16 @@ export class MykbStore implements KnowledgeStore {
   }
 
   private persistEntry(entry: KnowledgeEntry): string {
+    // Validate the zone BEFORE the JSONL append. The db CHECK
+    // constraint would otherwise reject an invalid zone only after
+    // appendEntry has already written the line, leaving the JSONL
+    // (source of truth) and the db index split (the kb gotcha
+    // vwpvk7lQ / mykb-curator#2 hazard).
+    if (!Object.values(Zone).includes(entry.zone)) {
+      throw new EntryValidationError(
+        `Invalid zone '${entry.zone}'. Valid zones: ${Object.values(Zone).join(', ')}`,
+      );
+    }
     appendEntry(this.brainPath, entry.area, entry);
     dbUpsert(this.db, entry);
     return entry.id;

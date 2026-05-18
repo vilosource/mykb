@@ -59,7 +59,7 @@ export function registerKbLoad(pi: ExtensionAPI, store: MykbStore): void {
         area: { type: 'string', description: 'Knowledge area ID' },
         zone: {
           type: 'string',
-          enum: ['active', 'established', 'archive'],
+          enum: ['incoming', 'active', 'established', 'archive'],
           description: 'Filter by zone (optional)',
         },
         tag: {
