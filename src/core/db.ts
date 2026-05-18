@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS entries (
   type        TEXT NOT NULL CHECK(type IN ('fact','decision','gotcha','pattern','link')),
   text        TEXT NOT NULL,
   tags        TEXT,
-  zone        TEXT NOT NULL DEFAULT 'active' CHECK(zone IN ('active','established','archive')),
+  zone        TEXT NOT NULL DEFAULT 'active' CHECK(zone IN ('incoming','active','established','archive')),
   prov_status TEXT CHECK(prov_status IN ('verified','unverified','stale','expires')),
   prov_date   TEXT,
   prov_source TEXT,

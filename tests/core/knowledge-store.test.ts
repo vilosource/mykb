@@ -378,6 +378,104 @@ describe('MykbStore', () => {
     });
   });
 
+  describe('incoming zone (decisions J2N6eo8S / ei2k4oZF)', () => {
+    it('accepts zone=incoming and persists it (schema + JSONL + db)', async () => {
+      await withTempBrain(async (brainPath) => {
+        fs.mkdirSync(path.join(brainPath, 'areas'), { recursive: true });
+        const store = MykbStore.open(brainPath);
+
+        const id = store.addFact('my-area', 'agent-proposed, unverified', {
+          zone: Zone.Incoming,
+        });
+
+        const entries = store.loadArea('my-area');
+        const entry = entries.find((e) => e.id === id)!;
+        expect(entry.zone).toBe(Zone.Incoming);
+
+        // JSONL is the source of truth — it must agree with the db
+        // (no corrupt-JSONL / crashed-db split).
+        const jsonl = fs.readFileSync(
+          path.join(brainPath, 'areas', 'my-area', 'facts.jsonl'),
+          'utf8',
+        );
+        expect(jsonl).toContain('"zone":"incoming"');
+
+        store.close();
+      });
+    });
+
+    it('keeps defaulting new entries to active (quarantine is opt-in)', async () => {
+      await withTempBrain(async (brainPath) => {
+        fs.mkdirSync(path.join(brainPath, 'areas'), { recursive: true });
+        const store = MykbStore.open(brainPath);
+
+        const id = store.addFact('my-area', 'operator-authored');
+        const entry = store.loadArea('my-area').find((e) => e.id === id)!;
+        expect(entry.zone).toBe(Zone.Active);
+
+        store.close();
+      });
+    });
+
+    it('verifyEntry on an incoming entry moves it to active', async () => {
+      await withTempBrain(async (brainPath) => {
+        fs.mkdirSync(path.join(brainPath, 'areas'), { recursive: true });
+        const store = MykbStore.open(brainPath);
+
+        const id = store.addFact('my-area', 'release me', {
+          zone: Zone.Incoming,
+        });
+        store.verifyEntry('my-area', id);
+
+        const entry = store.loadArea('my-area').find((e) => e.id === id)!;
+        expect(entry.zone).toBe(Zone.Active);
+        expect(entry.provenance.status).toBe(ProvenanceStatus.Verified);
+
+        store.close();
+      });
+    });
+
+    it('verifyEntry leaves a non-incoming zone unchanged', async () => {
+      await withTempBrain(async (brainPath) => {
+        fs.mkdirSync(path.join(brainPath, 'areas'), { recursive: true });
+        const store = MykbStore.open(brainPath);
+
+        const id = store.addFact('my-area', 'already established', {
+          zone: Zone.Established,
+        });
+        store.verifyEntry('my-area', id);
+
+        const entry = store.loadArea('my-area').find((e) => e.id === id)!;
+        expect(entry.zone).toBe(Zone.Established);
+        expect(entry.provenance.status).toBe(ProvenanceStatus.Verified);
+
+        store.close();
+      });
+    });
+
+    it('rejects an invalid zone BEFORE writing JSONL (no corrupt entry)', async () => {
+      await withTempBrain(async (brainPath) => {
+        fs.mkdirSync(path.join(brainPath, 'areas'), { recursive: true });
+        const store = MykbStore.open(brainPath);
+
+        expect(() =>
+          store.addFact('my-area', 'bad zone', {
+            zone: 'nonsense' as Zone,
+          }),
+        ).toThrow();
+
+        // The hazard this guards: JSONL appended, then db CHECK
+        // crashes -> split brain. facts.jsonl must not carry it.
+        const jsonlPath = path.join(brainPath, 'areas', 'my-area', 'facts.jsonl');
+        const orphaned =
+          fs.existsSync(jsonlPath) && fs.readFileSync(jsonlPath, 'utf8').includes('bad zone');
+        expect(orphaned).toBe(false);
+
+        store.close();
+      });
+    });
+  });
+
   describe('auto-creates area', () => {
     it('creates area metadata when adding entry to new area', async () => {
       await withTempBrain(async (brainPath) => {

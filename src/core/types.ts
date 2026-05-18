@@ -8,6 +8,10 @@ export enum ProvenanceStatus {
 }
 
 export enum Zone {
+  // Lifecycle order: Incoming (quarantined, unverified — agent/curator
+  // proposals land here, opt-in via --zone incoming) -> Active (in
+  // circulation) -> Established. Archive is out-of-circulation.
+  Incoming = 'incoming',
   Active = 'active',
   Established = 'established',
   Archive = 'archive',

@@ -130,7 +130,7 @@ addCmd
   .description('Add a fact')
   .option('--source <source>', 'Source of the fact')
   .option('--tags <tags>', 'Comma-separated tags')
-  .option('--zone <zone>', 'Zone (active, established, archive)')
+  .option('--zone <zone>', 'Zone (incoming, active, established, archive)')
   .option('--unverified', 'Mark as unverified (default)')
   .action((area: string, text: string, opts: { source?: string; tags?: string; zone?: string }) => {
     withStore((store) => {
