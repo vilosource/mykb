@@ -358,6 +358,51 @@ describe('kb CLI', () => {
     });
   });
 
+  // The curator's exact path: ShellKBWriter shells `kb add ... --zone
+  // incoming` then a human `kb verify`s it. Covers decisions
+  // J2N6eo8S (incoming opt-in, default still active) + ei2k4oZF
+  // (verify on incoming -> active) at the CLI/integration layer.
+  describe('incoming zone (J2N6eo8S / ei2k4oZF)', () => {
+    beforeEach(() => {
+      runKb('init');
+    });
+
+    it('add --zone incoming persists the entry in zone incoming', () => {
+      const add = runKb('add fact networking "agent proposal" --source wiki --zone incoming');
+      expect(add.exitCode).toBe(0);
+      const { stdout } = runKb('load networking --json');
+      const entry = JSON.parse(stdout).find((e: { text: string }) => e.text === 'agent proposal');
+      expect(entry.zone).toBe('incoming');
+    });
+
+    it('add without --zone still defaults to active', () => {
+      runKb('add fact networking "operator fact" --source me');
+      const { stdout } = runKb('load networking --json');
+      const entry = JSON.parse(stdout).find((e: { text: string }) => e.text === 'operator fact');
+      expect(entry.zone).toBe('active');
+    });
+
+    it('verify on an incoming entry moves it to active', () => {
+      const add = runKb('add fact networking "release me" --source wiki --zone incoming');
+      const id = add.stdout.match(/[a-zA-Z0-9_-]{8}/)![0];
+      const { exitCode } = runKb(`verify networking ${id}`);
+      expect(exitCode).toBe(0);
+      const { stdout } = runKb('load networking --json');
+      const entry = JSON.parse(stdout).find((e: { id: string }) => e.id === id);
+      expect(entry.zone).toBe('active');
+      expect(entry.provenance.status).toBe('verified');
+    });
+
+    it('an invalid zone fails WITHOUT writing an orphan JSONL line', () => {
+      const { exitCode } = runKb('add fact networking "must not persist" --source x --zone bogus');
+      expect(exitCode).toBe(1);
+      const jsonl = path.join(brainPath, 'areas', 'networking', 'facts.jsonl');
+      const orphaned =
+        fs.existsSync(jsonl) && fs.readFileSync(jsonl, 'utf-8').includes('must not persist');
+      expect(orphaned).toBe(false);
+    });
+  });
+
   describe('delete', () => {
     it('deletes an entry', () => {
       runKb('init');
