@@ -50,8 +50,9 @@ Add to `KnowledgeEntry`:
 
 ```ts
 type Validity = {
-  valid_from: string;                 // ISO date — when the claim became true
-  valid_until?: string;                // ISO date — when it stopped being true (if known)
+  valid_from: string;                 // ISO date — when the claim became true (event time)
+  valid_until?: string;                // ISO date — when it stopped being true, if known (event time)
+  recorded_invalid_at?: string;        // ISO date — when WE recorded the invalidation (system time)
   superseded_by?: string;              // entry id that replaces this one
 };
 
@@ -66,8 +67,9 @@ Semantics:
 - `valid_from` defaults to `created` for entries authored after this change lands; backfilled to `created` for legacy rows during migration (best-effort, see §Migration).
 - `valid_until` is `undefined` for entries believed currently true. Setting it does **not** archive the entry — archive is a separate lifecycle concern. An entry can be `Zone.Established` and `valid_until=2025-11-01`; that means "this was the answer in 2025, kept for historical lookup, do not surface as current."
 - `superseded_by` is the explicit replacement pointer. The retrieval layer uses it to demote rather than delete: if entry A is superseded by B, A is filtered out of default queries but reachable via `--include-superseded`.
+- `recorded_invalid_at` is the **system-time end**: when *we recorded* that the fact stopped being true, as distinct from `valid_until` (when it *actually* stopped). Set atomically alongside `valid_until` / `superseded_by`; `undefined` while the fact is believed current. This is the field that answers retrospective audit queries — "what did we believe about X on date D" — which `updated` cannot, because `updated` is rewritten on any mutation (e.g. a tag edit; see `knowledge-store.ts:191`).
 
-The pair `(valid_from, valid_until)` defines the validity interval. Together with `created`/`updated` (the system-time pair) this gives Graphiti-style bi-temporal facts: *what was true* vs. *what we recorded and when*.
+The pair `(valid_from, valid_until)` is the **event-time** interval (when the claim was true in the world). The pair `(created, recorded_invalid_at)` is the **system-time** interval (when mykb believed it). Both pairs together give the true 2×2 bi-temporal model Graphiti uses (`valid_at`/`invalid_at` + `created_at`/`expired_at`). Note `updated` is *not* the system-time end — it is last-touch time and must not be relied on for temporal queries (corrected per `graphiti-reevaluation-2026-05-18.md`).
 
 ### 2. Trust level (commitment 8)
 
