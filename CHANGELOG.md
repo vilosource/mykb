@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/vilosource/mykb/compare/v0.2.1...v0.3.0) (2026-05-18)
+
+
+### Features
+
+* **daemon:** dual capability sockets + container topology (phase 6) ([#28](https://github.com/vilosource/mykb/issues/28)) ([9b202ea](https://github.com/vilosource/mykb/commit/9b202eadfbfc7f29458cded1dd5d64943cceb291))
+* **daemon:** extension switchover to daemon-aware store selection (phase 4) ([#26](https://github.com/vilosource/mykb/issues/26)) ([b487726](https://github.com/vilosource/mykb/commit/b487726c0346a6528d1db3878dbaa751e54340c3))
+* **daemon:** kb CLI switchover to daemon-aware store selection (phase 5) ([#27](https://github.com/vilosource/mykb/issues/27)) ([653fb54](https://github.com/vilosource/mykb/commit/653fb5411440772d129589782d4dac1051dca4cd))
+* **daemon:** RpcKnowledgeStore — sync client Adapter over the wire (phase 3) ([#24](https://github.com/vilosource/mykb/issues/24)) ([77b7502](https://github.com/vilosource/mykb/commit/77b750268ee02e89ba4e7fc6d9572e673ff9d5d9))
+* **daemon:** v2 privileged-write-channel daemon scaffold (phase 2) ([#22](https://github.com/vilosource/mykb/issues/22)) ([2e12102](https://github.com/vilosource/mykb/commit/2e12102be8026cca0349c8a377f229031ac40bad))
+* **zones:** add 'incoming' quarantine zone ([#30](https://github.com/vilosource/mykb/issues/30)) ([ff98fe2](https://github.com/vilosource/mykb/commit/ff98fe20c4ad6f21ba9df58ee80ce24952a7ff89))
+
 ## [0.2.1](https://github.com/vilosource/mykb/compare/v0.2.0...v0.2.1) (2026-05-13)
 
 

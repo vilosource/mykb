@@ -1,6 +1,6 @@
 {
   "name": "@vilosource/mykb",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "description": "Persistent, structured, git-native knowledge for AI coding agents. CLI + Pi extension; JSONL + SQLite hybrid storage; auto-injected context.",
   "keywords": [
