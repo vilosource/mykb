@@ -21,18 +21,35 @@ function runKb(
   // pointer rather than a process-wide /tmp session file.
   const env: NodeJS.ProcessEnv = { ...process.env, MYKB_DIR: brainPath };
   delete env.KB_SESSION_ID;
-  const result = spawnSync(`node ${CLI_PATH} ${args}`, {
-    cwd: PROJECT_ROOT,
-    env,
-    encoding: 'utf-8',
-    timeout: 10000,
-    shell: true,
-    input: opts?.stdin,
-  });
+  const exec = () =>
+    spawnSync(`node ${CLI_PATH} ${args}`, {
+      cwd: PROJECT_ROOT,
+      env,
+      encoding: 'utf-8',
+      // 30s (was 10s): a cold node start + module load under loaded 2-core CI
+      // with cross-file vitest parallelism can blow a 10s budget. See issue #25.
+      timeout: 30000,
+      shell: true,
+      input: opts?.stdin,
+    });
+  // status === null means the subprocess was killed (timeout/signal), not a
+  // clean exit — the CI flake signature behind issue #25 (it surfaced as a
+  // misleading `exitCode 1`). Retry once, then fail loudly with a real
+  // diagnostic instead of a coerced exit code.
+  let result = exec();
+  if (result.status === null) {
+    result = exec();
+  }
+  if (result.status === null) {
+    throw new Error(
+      `runKb('${args}') did not exit cleanly after retry: ` +
+        `signal=${result.signal} error=${result.error?.message ?? 'none'}`,
+    );
+  }
   return {
     stdout: (result.stdout || '').toString(),
     stderr: (result.stderr || '').toString(),
-    exitCode: result.status ?? 1,
+    exitCode: result.status,
   };
 }
 
