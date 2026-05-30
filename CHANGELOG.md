@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/vilosource/mykb/compare/v0.3.0...v0.3.1) (2026-05-30)
+
+
+### Bug Fixes
+
+* **test:** harden work.test.ts runKb against CI spawn-timeout flake ([#34](https://github.com/vilosource/mykb/issues/34)) ([b7fa37a](https://github.com/vilosource/mykb/commit/b7fa37a09d741e00aab40795e84dd609eb02b75b))
+
 ## [0.3.0](https://github.com/vilosource/mykb/compare/v0.2.1...v0.3.0) (2026-05-18)
 
 
